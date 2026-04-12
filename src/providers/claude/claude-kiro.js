@@ -57,6 +57,13 @@ const MODEL_CONTEXT_TOKENS = {
     "claude-sonnet-4-5-20250929": 200000,
     "claude-haiku-4-5": 200000,
     "claude-haiku-4-5-20251001": 200000,
+    // Third-party models
+    "auto": 200000,
+    "deepseek-3.2": 128000,
+    "minimax-m2.5": 200000,
+    "minimax-m2.1": 128000,
+    "glm-5": 256000,
+    "qwen3-coder-next": 128000
 };
 
 function getContextTokensForModel(model) {
@@ -73,7 +80,14 @@ const FULL_MODEL_MAPPING = {
     "claude-opus-4-5":"claude-opus-4.5",
     "claude-opus-4-5-20251101":"claude-opus-4.5",
     "claude-sonnet-4-5": "claude-sonnet-4.5",
-    "claude-sonnet-4-5-20250929": "claude-sonnet-4.5"
+    "claude-sonnet-4-5-20250929": "claude-sonnet-4.5",
+    // Third-party models (identity mappings)
+    "auto": "auto",
+    "deepseek-3.2": "deepseek-3.2",
+    "minimax-m2.5": "minimax-m2.5",
+    "minimax-m2.1": "minimax-m2.1",
+    "glm-5": "glm-5",
+    "qwen3-coder-next": "qwen3-coder-next"
 };
 
 // 只保留 KIRO_MODELS 中存在的模型映射
