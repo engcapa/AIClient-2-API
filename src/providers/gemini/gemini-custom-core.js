@@ -223,7 +223,9 @@ export class GeminiCustomApiService {
 
         let baseModel = model;
         if (!GEMINI_CUSTOM_MODELS.includes(model)) {
-            logger.warn(`[Gemini Custom] Model '${model}' not in configured list. Using as-is: '${model}'`);
+            const fallbackModel = GEMINI_CUSTOM_MODELS[0];
+            logger.warn(`[Gemini Custom] Model '${model}' not in configured list. Falling back to: '${fallbackModel}'`);
+            baseModel = fallbackModel;
         }
 
         const processedRequestBody = normalizeGeminiThinkingRequest(
@@ -265,7 +267,9 @@ export class GeminiCustomApiService {
 
         let baseModel = model;
         if (!GEMINI_CUSTOM_MODELS.includes(model)) {
-            logger.warn(`[Gemini Custom] Model '${model}' not in configured list. Using as-is: '${model}'`);
+            const fallbackModel = GEMINI_CUSTOM_MODELS[0];
+            logger.warn(`[Gemini Custom] Model '${model}' not in configured list. Falling back to: '${fallbackModel}'`);
+            baseModel = fallbackModel;
         }
 
         const processedRequestBody = normalizeGeminiThinkingRequest(
