@@ -29,6 +29,37 @@ export const PROVIDER_MODELS = {
         'gemini-claude-sonnet-4-6',
         'gemini-claude-opus-4-6-thinking',
     ],
+    'gemini-custom': [
+        'gemini-3.1-flash-lite-preview',
+        'gemini-2.0-flash-exp',
+        'gemini-exp-1206',
+        'gemini-2.0-flash-thinking-exp-1219',
+        'gemini-2.0-flash-thinking-exp:generateContent',
+        'gemini-exp-1121',
+        'gemini-1.5-pro',
+        'gemini-1.5-pro-002',
+        'gemini-1.5-pro-001',
+        'gemini-1.5-pro-exp-0827',
+        'gemini-1.5-pro-exp-0801',
+        'gemini-1.5-flash',
+        'gemini-1.5-flash-002',
+        'gemini-1.5-flash-001',
+        'gemini-1.5-flash-exp-0827',
+        'gemini-1.5-flash-8b',
+        'gemini-1.5-flash-8b-001',
+        'gemini-1.5-flash-8b-exp-0827',
+        'gemini-1.5-flash-8b-exp-0924',
+        'gemini-1.0-pro',
+        'gemini-1.0-pro-001',
+        'gemini-1.0-pro-002',
+        'gemini-1.0-pro-vision',
+        'gemini-pro',
+        'gemini-pro-vision',
+        'gemini-ultra',
+        'text-embedding-004',
+        'embedding-001',
+        'aqa'
+    ],
     'claude-custom': [],
     'claude-kiro-oauth': [
         'claude-haiku-4-5',
@@ -129,7 +160,8 @@ export const PROVIDER_MODELS = {
 export const MANAGED_MODEL_LIST_PROVIDERS = [
     'openai-custom',
     'openaiResponses-custom',
-    'claude-custom'
+    'claude-custom',
+    'gemini-custom'
 ];
 
 export function getManagedModelListProviderType(providerType) {

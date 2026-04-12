@@ -56,6 +56,7 @@ export const MODEL_PROTOCOL_PREFIX = {
 export const MODEL_PROVIDER = {
     GEMINI_CLI: 'gemini-cli-oauth',
     ANTIGRAVITY: 'gemini-antigravity',
+    GEMINI_CUSTOM: 'gemini-custom',
     OPENAI_CUSTOM: 'openai-custom',
     OPENAI_CUSTOM_RESPONSES: 'openaiResponses-custom',
     CLAUDE_CUSTOM: 'claude-custom',

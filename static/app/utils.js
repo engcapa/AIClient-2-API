@@ -64,14 +64,19 @@ function getBaseProviderConfigs() {
             name: t('dashboard.routing.nodeName.openai'), 
             icon: 'fa-microchip'
         },
-        { 
-            id: 'claude-custom', 
-            name: t('dashboard.routing.nodeName.claude'), 
+        {
+            id: 'claude-custom',
+            name: t('dashboard.routing.nodeName.claude'),
             icon: 'fa-brain'
         },
-        { 
-            id: 'openaiResponses-custom', 
-            name: 'OpenAI Responses', 
+        {
+            id: 'gemini-custom',
+            name: 'Gemini Custom',
+            icon: 'fa-robot'
+        },
+        {
+            id: 'openaiResponses-custom',
+            name: 'OpenAI Responses',
             icon: 'fa-reply-all'
         },
     ];
@@ -271,6 +276,20 @@ function getProviderTypeFields(providerType) {
                 label: 'Claude Base URL',
                 type: 'text',
                 placeholder: 'https://api.anthropic.com'
+            }
+        ],
+        'gemini-custom': [
+            {
+                id: 'GEMINI_API_KEY',
+                label: 'Gemini API Key',
+                type: 'password',
+                placeholder: 'AIza...'
+            },
+            {
+                id: 'GEMINI_BASE_URL',
+                label: 'Gemini Base URL',
+                type: 'text',
+                placeholder: 'https://generativelanguage.googleapis.com/v1beta'
             }
         ],
         'gemini-cli-oauth': [

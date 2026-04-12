@@ -347,6 +347,40 @@ export class ClaudeApiServiceAdapter extends ApiServiceAdapter {
     }
 }
 
+// Gemini Custom API 服务适配器
+export class GeminiCustomApiServiceAdapter extends ApiServiceAdapter {
+    constructor(config) {
+        super();
+        const { GeminiCustomApiService } = require('./gemini/gemini-custom-core.js');
+        this.geminiCustomApiService = new GeminiCustomApiService(config);
+    }
+
+    async generateContent(model, requestBody) {
+        return await this.geminiCustomApiService.generateContent(model, requestBody);
+    }
+
+    async *generateContentStream(model, requestBody) {
+        const stream = this.geminiCustomApiService.generateContentStream(model, requestBody);
+        yield* stream;
+    }
+
+    async listModels() {
+        return await this.geminiCustomApiService.listModels();
+    }
+
+    async refreshToken() {
+        return Promise.resolve();
+    }
+
+    async forceRefreshToken() {
+        return Promise.resolve();
+    }
+
+    isExpiryDateNear() {
+        return false;
+    }
+}
+
 // Kiro API 服务适配器
 export class KiroApiServiceAdapter extends ApiServiceAdapter {
     constructor(config) {
@@ -694,6 +728,7 @@ registerAdapter(MODEL_PROVIDER.OPENAI_CUSTOM_RESPONSES, OpenAIResponsesApiServic
 registerAdapter(MODEL_PROVIDER.GEMINI_CLI, GeminiApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.ANTIGRAVITY, AntigravityApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.CLAUDE_CUSTOM, ClaudeApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.GEMINI_CUSTOM, GeminiCustomApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.KIRO_API, KiroApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.QWEN_API, QwenApiServiceAdapter);
 // registerAdapter(MODEL_PROVIDER.IFLOW_API, IFlowApiServiceAdapter);
