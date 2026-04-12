@@ -1,6 +1,7 @@
 import { OpenAIResponsesApiService } from './openai/openai-responses-core.js';
 import { GeminiApiService } from './gemini/gemini-core.js';
 import { AntigravityApiService } from './gemini/antigravity-core.js';
+import { GeminiCustomApiService } from './gemini/gemini-custom-core.js';
 import { OpenAIApiService } from './openai/openai-core.js';
 import { ClaudeApiService } from './claude/claude-core.js';
 import { KiroApiService } from './claude/claude-kiro.js';
@@ -351,7 +352,6 @@ export class ClaudeApiServiceAdapter extends ApiServiceAdapter {
 export class GeminiCustomApiServiceAdapter extends ApiServiceAdapter {
     constructor(config) {
         super();
-        const { GeminiCustomApiService } = require('./gemini/gemini-custom-core.js');
         this.geminiCustomApiService = new GeminiCustomApiService(config);
     }
 
