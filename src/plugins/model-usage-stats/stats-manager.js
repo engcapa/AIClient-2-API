@@ -42,14 +42,21 @@ function createDefaultStore() {
     return {
         updatedAt: null,
         summary: createEmptyUsage(),
-        providers: {}
+        providers: {},
+        daily: {} // 新增每日统计
     };
 }
 
-function normalizeUsageBlock(block = {}) {
+function normalizeUsageBlock(block) {
+    const empty = createEmptyUsage();
+    if (!block || typeof block !== 'object') return empty;
     return {
-        ...createEmptyUsage(),
-        ...block
+        requestCount: toNumber(block.requestCount),
+        promptTokens: toNumber(block.promptTokens),
+        completionTokens: toNumber(block.completionTokens),
+        totalTokens: toNumber(block.totalTokens),
+        cachedTokens: toNumber(block.cachedTokens),
+        lastUsedAt: block.lastUsedAt || null
     };
 }
 
@@ -57,7 +64,8 @@ function normalizeStore(store) {
     const normalizedStore = {
         updatedAt: store?.updatedAt || null,
         summary: normalizeUsageBlock(store?.summary),
-        providers: {}
+        providers: {},
+        daily: {} // 新增每日统计
     };
 
     for (const [provider, providerStore] of Object.entries(store?.providers || {})) {
@@ -68,6 +76,12 @@ function normalizeStore(store) {
 
         for (const [model, modelStore] of Object.entries(providerStore?.models || {})) {
             normalizedStore.providers[provider].models[model] = normalizeUsageBlock(modelStore);
+        }
+    }
+
+    if (store?.daily) {
+        for (const [date, dailyStore] of Object.entries(store.daily)) {
+            normalizedStore.daily[date] = normalizeUsageBlock(dailyStore);
         }
     }
 
@@ -129,19 +143,21 @@ function ensureLoaded() {
         if (persistTimer.unref) {
             persistTimer.unref();
         }
-        process.on('beforeExit', () => persistIfDirty());
-        process.on('SIGINT', () => { persistIfDirty(); process.exit(0); });
-        process.on('SIGTERM', () => { persistIfDirty(); process.exit(0); });
+        process.on('beforeExit', () => syncWriteToFile());
+        process.on('SIGINT', () => { syncWriteToFile(); process.exit(0); });
+        process.on('SIGTERM', () => { syncWriteToFile(); process.exit(0); });
     }
 }
 
-function syncWriteToFile() {
+export function syncWriteToFile() {
     try {
+        if (!statsStore || !isDirty) return;
         const dir = path.dirname(STATS_STORE_FILE);
         if (!existsSync(dir)) {
             mkdirSync(dir, { recursive: true });
         }
         writeFileSync(STATS_STORE_FILE, JSON.stringify(statsStore, null, 2), 'utf8');
+        isDirty = false;
         logger.info('[Model Usage Stats] Sync persisted stats store');
     } catch (error) {
         logger.error('[Model Usage Stats] Sync write failed:', error.message);
@@ -394,6 +410,14 @@ export async function finalizeRequest({ requestId, model, provider, fromProvider
     applyUsage(statsStore.summary, usage, timestamp);
     applyUsage(ensureProviderStore(normalizedProvider).summary, usage, timestamp);
     applyUsage(ensureModelStore(normalizedProvider, normalizedModel), usage, timestamp);
+
+    // 记录每日统计
+    const dateKey = timestamp.split('T')[0];
+    if (!statsStore.daily[dateKey]) {
+        statsStore.daily[dateKey] = createEmptyUsage();
+    }
+    applyUsage(statsStore.daily[dateKey], usage, timestamp);
+
     logger.info(`${getTracePrefix(requestId)} >>> Request Finalized: Provider: ${normalizedProvider} | Model: ${normalizedModel} | Prompt: ${usage.promptTokens} | Completion: ${usage.completionTokens} | Total: ${usage.totalTokens} | Cached: ${usage.cachedTokens} | Stream: ${Boolean(state.isStream)}`);
     markDirty();
     await persistIfDirty();
@@ -419,6 +443,12 @@ export async function resetTokenStats() {
     ensureLoaded();
 
     resetUsageBlockTokens(statsStore.summary);
+
+    if (statsStore.daily) {
+        for (const dayBlock of Object.values(statsStore.daily)) {
+            resetUsageBlockTokens(dayBlock);
+        }
+    }
 
     for (const providerStore of Object.values(statsStore.providers || {})) {
         resetUsageBlockTokens(providerStore.summary);
