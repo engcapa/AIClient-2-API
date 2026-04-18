@@ -1,15 +1,43 @@
 import * as fs from 'fs';
-import { getServiceAdapter, getRegisteredProviders } from './adapter.js';
+import { getServiceAdapter, getRegisteredProviders, invalidateServiceAdapter } from './adapter.js';
 import logger from '../utils/logger.js';
 import { MODEL_PROVIDER, getProtocolPrefix } from '../utils/common.js';
 import { convertData } from '../convert/convert.js';
 import {
     getConfiguredSupportedModels,
+    getCustomModelListProvider,
     getProviderModels,
     normalizeModelIds
 } from './provider-models.js';
 import { broadcastEvent } from '../ui-modules/event-broadcast.js';
 import { ENDPOINT_TYPE } from '../utils/common.js';
+
+function getCustomModelAliasesForProvider(config, providerType) {
+    const customModels = Array.isArray(config?.customModels) ? config.customModels : [];
+    return new Set(
+        customModels
+            .filter(model => {
+                const listProvider = getCustomModelListProvider(model);
+                return model?.alias &&
+                    model.alias !== model.id &&
+                    listProvider &&
+                    (listProvider === providerType || providerType.startsWith(listProvider + '-'));
+            })
+            .map(model => model.alias)
+    );
+}
+
+function getCustomModelIdsForProvider(config, providerType) {
+    const customModels = Array.isArray(config?.customModels) ? config.customModels : [];
+    return customModels
+        .filter(model => {
+            const listProvider = getCustomModelListProvider(model);
+            return model?.id &&
+                listProvider &&
+                (listProvider === providerType || providerType.startsWith(listProvider + '-'));
+        })
+        .map(model => model.id);
+}
 
 /**
  * Manages a pool of API service providers, handling their health and selection.
@@ -85,6 +113,22 @@ export class ProviderPoolManager {
     }
 
     /**
+     * 强制刷新特定节点的令牌
+     * @param {string} providerType 
+     * @param {string} uuid 
+     * @param {boolean} force 
+     */
+    async refreshNode(providerType, uuid, force = true) {
+        const provider = this._findProvider(providerType, uuid);
+        if (provider) {
+            this._log('info', `Manually triggering refresh for node ${uuid} (${providerType})`);
+            this._enqueueRefresh(providerType, provider, force);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * 检查所有节点的配置文件，如果发现即将过期则触发刷新
      */
     async checkAndRefreshExpiringNodes() {
@@ -112,16 +156,23 @@ export class ProviderPoolManager {
                 }
                 
                 // logger.info(`Checking node ${providerStatus.uuid} (${providerType}) expiry date... configPath: ${configPath}`);
-                // 排除不健康和禁用的节点
-                if (!config.isHealthy || config.isDisabled) continue;
+                // 排除禁用的节点（不健康节点也应允许尝试刷新以恢复健康）
+                if (config.isDisabled) continue;
 
                 if (configPath && fs.existsSync(configPath)) {
                     try {
                         const fileContent = fs.readFileSync(configPath, 'utf-8');
                         const credData = JSON.parse(fileContent);
-                        const expiryTime = credData.expiry_date || credData.expiry || credData.expires_at;
+                        const rawExpiryTime = credData.expiry_date ?? credData.expiry ?? credData.expires_at ?? credData.expiresAt;
+                        let expiryTime = null;
+                        if (typeof rawExpiryTime === 'number') {
+                            expiryTime = rawExpiryTime;
+                        } else if (typeof rawExpiryTime === 'string') {
+                            const parsedDate = Date.parse(rawExpiryTime);
+                            expiryTime = Number.isNaN(parsedDate) ? Number(rawExpiryTime) : parsedDate;
+                        }
                         const nearExpiryMs = (this.globalConfig?.CRON_NEAR_MINUTES || 10) * 60 * 1000;
-                        if (!expiryTime) {
+                        if (!Number.isFinite(expiryTime)) {
                             // 凭据文件缺少 expiry 字段，无法判断是否快过期，作为安全措施强制刷新
                             this._log('warn', `Node ${providerStatus.uuid} (${providerType}) has no expiry field. Forcing refresh as safety measure...`);
                             this._enqueueRefresh(providerType, providerStatus);
@@ -319,7 +370,9 @@ export class ProviderPoolManager {
                     const nextTask = currentQueue.waitingTasks.shift();
                     currentQueue.activeCount++;
                     // 使用 Promise.resolve().then 避免过深的递归
-                    Promise.resolve().then(nextTask);
+                    Promise.resolve().then(nextTask).catch(err => {
+                        this._log('error', `Failed to execute next task for ${providerType}: ${err.message}`);
+                    });
                 } else if (currentQueue.activeCount === 0) {
                     // 清理空队列：无论是否持有全局槽位，都应删除已无任务的队列对象
                     if (currentQueue.waitingTasks.length === 0 &&
@@ -335,7 +388,9 @@ export class ProviderPoolManager {
                     // 3. 尝试启动下一个等待中的提供商队列
                     if (this.globalRefreshWaiters.length > 0) {
                         const nextProviderStart = this.globalRefreshWaiters.shift();
-                        Promise.resolve().then(nextProviderStart);
+                        Promise.resolve().then(nextProviderStart).catch(err => {
+                            this._log('error', `Failed to start next provider queue: ${err.message}`);
+                        });
                     }
                 }
             }
@@ -344,7 +399,9 @@ export class ProviderPoolManager {
         const tryStartProviderQueue = () => {
             if (queue.activeCount < this.refreshConcurrency.perProvider) {
                 queue.activeCount++;
-                runTask();
+                runTask().catch(err => {
+                    this._log('error', `Critical error in runTask for ${providerType}: ${err.message}`);
+                });
             } else {
                 queue.waitingTasks.push(runTask);
             }
@@ -1308,17 +1365,20 @@ export class ProviderPoolManager {
 
         for (const providerType of allProviderTypes) {
             if (this.providerStatus[providerType]) {
-                let models = getProviderModels(providerType);
+                const customAliases = getCustomModelAliasesForProvider(this.globalConfig, providerType);
+                const customModelIds = getCustomModelIdsForProvider(this.globalConfig, providerType);
                 const configuredSupportedModels = normalizeModelIds(
                     this.providerStatus[providerType].flatMap(providerStatus =>
                         getConfiguredSupportedModels(providerType, providerStatus.config)
                     )
                 );
+                let models = configuredSupportedModels.length > 0
+                    ? normalizeModelIds([...configuredSupportedModels, ...customModelIds])
+                    : normalizeModelIds([
+                        ...getProviderModels(providerType).filter(model => !customAliases.has(model)),
+                        ...customModelIds
+                    ]);
 
-                if (configuredSupportedModels.length > 0) {
-                    models = configuredSupportedModels;
-                }
-                
                 // 如果硬编码的模型列表为空，或者该类型的提供商在号池中没有配置节点，尝试从服务获取
                 // 只有在非号池模式，或者号池中有节点时才尝试获取，避免无节点时读取全局默认配置
                 if (models.length === 0 && (!this.providerStatus[providerType] || this.providerStatus[providerType].length > 0)) {
@@ -1422,7 +1482,7 @@ export class ProviderPoolManager {
         if (provider) {
             // 防并发机制 A: 如果已经在刷新中，忽略请求
             if (this.refreshingUuids.has(provider.uuid)) {
-                this._log('debug', `Provider ${providerConfig.uuid} is already in refresh queue, ignoring duplicate request.`);
+                this._log('info', `Provider ${providerConfig.uuid} is already in refresh queue, ignoring duplicate refresh request.`);
                 return;
             }
 
@@ -1441,6 +1501,17 @@ export class ProviderPoolManager {
             this._enqueueRefresh(providerType, provider, true);
             
             this._debouncedSave(providerType);
+        } else {
+            let matchedType = null;
+            for (const [type, providers] of Object.entries(this.providerStatus || {})) {
+                if (providers.some(p => p.uuid === providerConfig.uuid)) {
+                    matchedType = type;
+                    break;
+                }
+            }
+            const knownTypes = Object.keys(this.providerStatus || {}).join(', ') || 'none';
+            const typeHint = matchedType ? ` Found same uuid under provider type ${matchedType}.` : '';
+            this._log('warn', `Provider ${providerConfig.uuid} not found in providerStatus for type ${providerType}; refresh not enqueued.${typeHint} Known provider types: ${knownTypes}`);
         }
     }
 
@@ -1738,6 +1809,8 @@ export class ProviderPoolManager {
             // 更新 provider 的 UUID
             provider.uuid = newUuid;
             provider.config.uuid = newUuid;
+            invalidateServiceAdapter(providerType, oldUuid);
+            invalidateServiceAdapter(providerType, newUuid);
             
             // 同时更新 providerPools 中的原始数据
             const poolArray = this.providerPools[providerType];

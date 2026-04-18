@@ -725,19 +725,34 @@ export class GrokApiServiceAdapter extends ApiServiceAdapter {
 // 注册所有内置适配器
 registerAdapter(MODEL_PROVIDER.OPENAI_CUSTOM, OpenAIApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.OPENAI_CUSTOM_RESPONSES, OpenAIResponsesApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.CLAUDE_CUSTOM, ClaudeApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.GEMINI_CLI, GeminiApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.ANTIGRAVITY, AntigravityApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.CLAUDE_CUSTOM, ClaudeApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.GEMINI_CUSTOM, GeminiCustomApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.KIRO_API, KiroApiServiceAdapter);
-registerAdapter(MODEL_PROVIDER.QWEN_API, QwenApiServiceAdapter);
-// registerAdapter(MODEL_PROVIDER.IFLOW_API, IFlowApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.CODEX_API, CodexApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.GROK_CUSTOM, GrokApiServiceAdapter);
 // registerAdapter(MODEL_PROVIDER.FORWARD_API, ForwardApiServiceAdapter);
+// registerAdapter(MODEL_PROVIDER.QWEN_API, QwenApiServiceAdapter);
+// registerAdapter(MODEL_PROVIDER.IFLOW_API, IFlowApiServiceAdapter);
 
 // 用于存储服务适配器单例的映射
 export const serviceInstances = {};
+
+export function getServiceInstanceKey(provider, uuid = null) {
+    return uuid ? provider + uuid : provider;
+}
+
+export function invalidateServiceAdapter(provider, uuid = null) {
+    const providerKey = getServiceInstanceKey(provider, uuid);
+    if (serviceInstances[providerKey]) {
+        delete serviceInstances[providerKey];
+        logger.info(`[Adapter] Invalidated service adapter, provider: ${provider}, uuid: ${uuid || 'default'}`);
+        return true;
+    }
+    return false;
+}
 
 /**
  * 检查提供商是否已注册（支持前缀匹配）
@@ -764,7 +779,7 @@ export function getServiceAdapter(config) {
     const customNameDisplay = config.customName ? ` (${config.customName})` : '';
     logger.info(`[Adapter] getServiceAdapter, provider: ${config.MODEL_PROVIDER}, uuid: ${config.uuid}${customNameDisplay}`);
     const provider = config.MODEL_PROVIDER;
-    const providerKey = config.uuid ? provider + config.uuid : provider;
+    const providerKey = getServiceInstanceKey(provider, config.uuid);
     
     if (!serviceInstances[providerKey]) {
         let AdapterClass = adapterRegistry.get(provider);
