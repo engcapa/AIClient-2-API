@@ -352,7 +352,7 @@
         [data-theme="dark"] .level-2, [data-theme="dark"] .calendar-day[data-level="2"] { background: #006d32; }
         [data-theme="dark"] .level-3, [data-theme="dark"] .calendar-day[data-level="3"] { background: #26a641; }
         [data-theme="dark"] .level-4, [data-theme="dark"] .calendar-day[data-level="4"] { background: #39d353; }
-        .calendar-tooltip { position: fixed; padding: 6px 10px; background: rgba(0,0,0,0.9); color: #fff; font-size: 11px; border-radius: 4px; pointer-events: none; z-index: 1000; display: none; box-shadow: 0 3px 10px rgba(0,0,0,0.3); white-space: nowrap; line-height: 1.4; }
+        .calendar-tooltip { position: fixed; padding: 6px 10px; background: rgba(0,0,0,0.9); color: #fff; font-size: 11px; border-radius: 4px; pointer-events: none; z-index: 1000; display: none; box-shadow: 0 3px 10px rgba(0,0,0,0.3); white-space: pre-line; line-height: 1.4; }
 
     </style>
 </head>
@@ -420,6 +420,7 @@
                     <span id="statToday">0</span>
                     <span class="dim"> / <span id="statLimit">0</span></span>
                 </div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">QPS: <span id="statQps" style="font-weight:700;color:var(--primary-color)">0.00</span> (峰值: <span id="statMaxQps">0.00</span>) | RPM: <span id="statRpm" style="font-weight:700;color:var(--primary-color)">0.00</span> (峰值: <span id="statMaxRpm">0.00</span>)</div>
             </div>
             <div class="stat-card green">
                 <div class="label">剩余额度</div>
@@ -434,6 +435,7 @@
             <div class="stat-card green">
                 <div class="label">今日 Tokens</div>
                 <div class="value" id="statTodayTokens">0</div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">TPS: <span id="statTps" style="font-weight:700;color:var(--primary-color)">0.00</span> (峰值: <span id="statMaxTps">0.00</span>)</div>
             </div>
             <div class="stat-card cyan">
                 <div class="label">今日缓存 Tokens</div>
@@ -646,6 +648,14 @@
             document.getElementById('statTotalTokens').textContent = formatTokenCompact(data.tokens?.total || 0);
             document.getElementById('statTotalCachedTokens').textContent = formatTokenCompact(data.tokens?.cached || 0);
             
+            // 速率统计
+            document.getElementById('statQps').textContent = (data.usage?.qps || 0).toFixed(2);
+            document.getElementById('statMaxQps').textContent = (data.usage?.maxQps || 0).toFixed(2);
+            document.getElementById('statRpm').textContent = (data.usage?.rpm || 0).toFixed(2);
+            document.getElementById('statMaxRpm').textContent = (data.usage?.maxRpm || 0).toFixed(2);
+            document.getElementById('statTps').textContent = (data.usage?.tps || 0).toFixed(2);
+            document.getElementById('statMaxTps').textContent = (data.usage?.maxTps || 0).toFixed(2);
+            
             // 最后使用时间
             if (data.lastUsedAt) {
                 const date = new Date(data.lastUsedAt);
@@ -676,7 +686,10 @@
             Object.entries(usageHistory).forEach(([date, data]) => {
                 dailyData[date] = {
                     totalTokens: data.summary?.totalTokens || 0,
-                    requestCount: data.summary?.requestCount || 0
+                    requestCount: data.summary?.requestCount || 0,
+                    maxQps: data.summary?.maxQps || 0,
+                    maxRpm: data.summary?.maxRpm || 0,
+                    maxTps: data.summary?.maxTps || 0
                 };
             });
             
@@ -690,7 +703,9 @@
                 date.setDate(startDate.getDate() + i);
                 if (date > now) break;
                 
-                const dateKey = date.toISOString().split('T')[0];
+                // 统一使用北京时间 (UTC+8) 生成 key，与后端保持一致
+                const utc8Date = new Date(date.getTime() + (8 * 60 * 60 * 1000));
+                const dateKey = utc8Date.toISOString().split('T')[0];
                 const entry = dailyData[dateKey] || { totalTokens: 0, requestCount: 0 };
                 const tokens = entry.totalTokens;
                 const requests = entry.requestCount;
@@ -709,9 +724,9 @@
                 day.className = 'calendar-day';
                 day.dataset.level = level;
                 
-                const tipText = `${dateKey}: ${formatNumber(requests)} 次请求, ${formatTokenCompact(tokens)} Tokens`;
+                const tipText = `${dateKey}: ${formatNumber(requests)} 次请求, ${formatTokenCompact(tokens)} Tokens${entry.maxQps ? `\n峰值: ${entry.maxQps.toFixed(2)} QPS / ${entry.maxRpm.toFixed(0)} RPM / ${entry.maxTps.toFixed(2)} TPS` : ''}`;
                 day.onmouseenter = (e) => {
-                    tooltip.textContent = tipText;
+                    tooltip.innerText = tipText;
                     tooltip.style.display = 'block';
                     const rect = day.getBoundingClientRect();
                     tooltip.style.left = `${rect.left + rect.width / 2 - tooltip.offsetWidth / 2}px`;

@@ -259,12 +259,19 @@
         /* Key 统计 */
         .key-stats {
             display: flex;
-            gap: 24px;
+            gap: 20px;
             flex-wrap: wrap;
+            flex: 3;
+            align-items: flex-start;
         }
         .key-stat {
-            text-align: center;
-            min-width: 70px;
+            flex: 1;
+            min-width: 140px;
+            padding: 4px 8px;
+            border-left: 2px solid var(--border-color);
+        }
+        .key-stat:first-child {
+            border-left: none;
         }
         .key-stat .label {
             font-size: 11px;
@@ -506,6 +513,8 @@
             .key-stat {
                 min-width: unset;
                 text-align: center;
+                border-left: none;
+                padding: 4px;
             }
             .key-actions {
                 display: grid;
@@ -589,7 +598,7 @@
         [data-theme="dark"] .level-2, [data-theme="dark"] .calendar-day[data-level="2"] { background: #006d32; }
         [data-theme="dark"] .level-3, [data-theme="dark"] .calendar-day[data-level="3"] { background: #26a641; }
         [data-theme="dark"] .level-4, [data-theme="dark"] .calendar-day[data-level="4"] { background: #39d353; }
-        .calendar-tooltip { position: fixed; padding: 6px 10px; background: rgba(0,0,0,0.9); color: #fff; font-size: 11px; border-radius: 4px; pointer-events: none; z-index: 1000; display: none; box-shadow: 0 3px 10px rgba(0,0,0,0.3); white-space: nowrap; line-height: 1.4; }
+        .calendar-tooltip { position: fixed; padding: 6px 10px; background: rgba(0,0,0,0.9); color: #fff; font-size: 11px; border-radius: 4px; pointer-events: none; z-index: 1000; display: none; box-shadow: 0 3px 10px rgba(0,0,0,0.3); white-space: pre-line; line-height: 1.4; }
     </style>
 </head>
 <body>
@@ -628,6 +637,7 @@
             <div class="stat-card pink">
                 <div class="label">今日总调用</div>
                 <div class="value" id="todayUsage">0</div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">QPS: <span id="currentQps" style="font-weight:700;color:var(--primary-color)">0.00</span> (峰值: <span id="maxQps">0.00</span>) | RPM: <span id="currentRpm" style="font-weight:700;color:var(--primary-color)">0.00</span> (峰值: <span id="maxRpm">0.00</span>)</div>
             </div>
             <div class="stat-card cyan">
                 <div class="label">累计调用</div>
@@ -636,6 +646,7 @@
             <div class="stat-card green">
                 <div class="label">今日总 Tokens</div>
                 <div class="value" id="todayTokens">0</div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">TPS: <span id="currentTps" style="font-weight:700;color:var(--primary-color)">0.00</span> (峰值: <span id="maxTps">0.00</span>)</div>
             </div>
             <div class="stat-card cyan">
                 <div class="label">今日缓存 Tokens</div>
@@ -712,6 +723,8 @@
                             <option value="usage-asc">今日用量 ↑</option>
                             <option value="total-desc">累计用量 ↓</option>
                             <option value="lastUsed-desc">最近使用 ↓</option>
+                            <option value="qps-desc">QPS 速率 ↓</option>
+                            <option value="rpm-desc">RPM 频率 ↓</option>
                             <option value="created-desc">创建时间 ↓</option>
                         </select>
                     </div>
@@ -887,6 +900,12 @@
             document.getElementById('todayCachedTokens').textContent = formatTokenCompact(stats.todayCachedTokens || 0);
             document.getElementById('totalTokens').textContent = formatTokenCompact(stats.totalTokens);
             document.getElementById('totalCachedTokens').textContent = formatTokenCompact(stats.totalCachedTokens || 0);
+            document.getElementById('currentQps').textContent = (stats.qps || 0).toFixed(2);
+            document.getElementById('maxQps').textContent = (stats.maxQps || 0).toFixed(2);
+            document.getElementById('currentRpm').textContent = (stats.rpm || 0).toFixed(2);
+            document.getElementById('maxRpm').textContent = (stats.maxRpm || 0).toFixed(2);
+            document.getElementById('currentTps').textContent = (stats.tps || 0).toFixed(2);
+            document.getElementById('maxTps').textContent = (stats.maxTps || 0).toFixed(2);
             
             // 渲染使用历史分布
             renderUsageHistory(stats.usageHistory);
@@ -910,7 +929,10 @@
             Object.entries(usageHistory).forEach(([date, data]) => {
                 dailyData[date] = {
                     totalTokens: data.summary?.totalTokens || 0,
-                    requestCount: data.summary?.requestCount || 0
+                    requestCount: data.summary?.requestCount || 0,
+                    maxQps: data.summary?.maxQps || 0,
+                    maxRpm: data.summary?.maxRpm || 0,
+                    maxTps: data.summary?.maxTps || 0
                 };
             });
             
@@ -924,7 +946,9 @@
                 date.setDate(startDate.getDate() + i);
                 if (date > now) break;
                 
-                const dateKey = date.toISOString().split('T')[0];
+                // 统一使用北京时间 (UTC+8) 生成 key，与后端保持一致
+                const utc8Date = new Date(date.getTime() + (8 * 60 * 60 * 1000));
+                const dateKey = utc8Date.toISOString().split('T')[0];
                 const entry = dailyData[dateKey] || { totalTokens: 0, requestCount: 0 };
                 const tokens = entry.totalTokens;
                 const requests = entry.requestCount;
@@ -943,9 +967,9 @@
                 day.className = 'calendar-day';
                 day.dataset.level = level;
                 
-                const tipText = `${dateKey}: ${formatNumber(requests)} 次请求, ${formatTokenCompact(tokens)} Tokens`;
+                const tipText = `${dateKey}: ${formatNumber(requests)} 次请求, ${formatTokenCompact(tokens)} Tokens${entry.maxQps ? `\n峰值: ${entry.maxQps.toFixed(2)} QPS / ${entry.maxRpm.toFixed(0)} RPM / ${entry.maxTps.toFixed(2)} TPS` : ''}`;
                 day.onmouseenter = (e) => {
-                    tooltip.textContent = tipText;
+                    tooltip.innerText = tipText;
                     tooltip.style.display = 'block';
                     const rect = day.getBoundingClientRect();
                     tooltip.style.left = `${rect.left + rect.width / 2 - tooltip.offsetWidth / 2}px`;
@@ -1086,6 +1110,8 @@
                 else if (field === 'usage') { va = a.todayUsage; vb = b.todayUsage; }
                 else if (field === 'total') { va = a.totalUsage; vb = b.totalUsage; }
                 else if (field === 'lastUsed') { va = a.lastUsedAt || ''; vb = b.lastUsedAt || ''; }
+                else if (field === 'qps') { va = a.qps || 0; vb = b.qps || 0; }
+                else if (field === 'rpm') { va = a.rpm || 0; vb = b.rpm || 0; }
                 else if (field === 'created') { va = a.createdAt || ''; vb = b.createdAt || ''; }
                 if (va < vb) return order === 'asc' ? -1 : 1;
                 if (va > vb) return order === 'asc' ? 1 : -1;
@@ -1161,9 +1187,19 @@
                             <div class="progress-bar"><div class="fill ${progressClass}" style="width:${Math.min(usagePercent, 100)}%"></div></div>
                         </div>
                         <div class="key-stat">
-                            <div class="label">累计</div>
-                            <div class="value">${key.totalUsage}</div>
+                            <div class="label">累计数据</div>
+                            <div class="value">${key.totalUsage} 次请求</div>
                             <div class="value muted">${formatTokenCompact(key.totalTokens || 0)} Tokens ${key.totalCachedTokens ? `(含 ${formatTokenCompact(key.totalCachedTokens)} 缓存)` : ''}</div>
+                        </div>
+                        <div class="key-stat">
+                            <div class="label">请求频率</div>
+                            <div class="value">${(key.qps || 0).toFixed(2)} QPS / ${(key.rpm || 0).toFixed(0)} RPM</div>
+                            <div class="value muted">峰值: ${(key.maxQps || 0).toFixed(2)} QPS / ${(key.maxRpm || 0).toFixed(0)} RPM</div>
+                        </div>
+                        <div class="key-stat">
+                            <div class="label">Token 速率</div>
+                            <div class="value">${(key.tps || 0).toFixed(1)} TPS</div>
+                            <div class="value muted">峰值: ${(key.maxTps || 0).toFixed(1)} TPS</div>
                         </div>
                         <div class="key-stat">
                             <div class="label">最后调用</div>
