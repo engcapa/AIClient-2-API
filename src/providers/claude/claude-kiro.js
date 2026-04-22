@@ -1046,7 +1046,7 @@ async saveCredentialsToFile(filePath, newData) {
                 };
                 toolsContext = { tools: [placeholderTool] };
             } else {
-                const MAX_DESCRIPTION_LENGTH = 10240;
+                const MAX_DESCRIPTION_LENGTH = 11024;
 
                 let truncatedCount = 0;
                 const kiroTools = filteredTools
