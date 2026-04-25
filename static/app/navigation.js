@@ -14,41 +14,32 @@ function initNavigation() {
     elements.navItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
-            const sectionId = item.dataset.section;
-
-            // 更新导航状态
-            elements.navItems.forEach(nav => nav.classList.remove('active'));
-            item.classList.add('active');
-
-            // 显示对应章节
-            elements.sections.forEach(section => {
-                section.classList.remove('active');
-                if (section.id === sectionId) {
-                    section.classList.add('active');
-                    
-                    // 如果是日志页面，默认滚动到底部
-                    if (sectionId === 'logs') {
-                        setTimeout(() => {
-                            const logsContainer = document.getElementById('logsContainer');
-                            if (logsContainer) {
-                                logsContainer.scrollTop = logsContainer.scrollHeight;
-                            }
-                        }, 100);
-                    }
-                }
-            });
-
-            // 滚动到顶部
-            scrollToTop();
+            activateSection(item.dataset.section, { updateHash: true });
         });
     });
+
+    window.addEventListener('hashchange', () => {
+        const sectionId = window.location.hash.slice(1) || 'dashboard';
+        activateSection(sectionId, { updateHash: false });
+    });
+
+    const initialSectionId = window.location.hash.slice(1) || 'dashboard';
+    activateSection(initialSectionId, { updateHash: false });
 }
 
 /**
- * 切换到指定章节
+ * 激活指定章节
  * @param {string} sectionId - 章节ID
+ * @param {Object} options - 额外选项
  */
-function switchToSection(sectionId) {
+function activateSection(sectionId, options = {}) {
+    const { updateHash = false } = options;
+    const hasMatchingSection = Array.from(elements.sections).some(section => section.id === sectionId);
+
+    if (!hasMatchingSection) {
+        return;
+    }
+
     // 更新导航状态
     elements.navItems.forEach(nav => {
         nav.classList.remove('active');
@@ -77,6 +68,25 @@ function switchToSection(sectionId) {
 
     // 滚动到顶部
     scrollToTop();
+
+    const hashWillChange = updateHash && window.location.hash !== `#${sectionId}`;
+    if (hashWillChange) {
+        window.location.hash = sectionId;
+    }
+
+    // 只有在哈希不改变时（例如初始加载、hashchange 事件触发、或点击当前已激活的项）才调用 loadAccessInfo
+    // 这样可以防止在 hashchange 触发时产生重复请求
+    if (sectionId === 'access' && !hashWillChange && typeof window.loadAccessInfo === 'function') {
+        window.loadAccessInfo();
+    }
+}
+
+/**
+ * 切换到指定章节
+ * @param {string} sectionId - 章节ID
+ */
+function switchToSection(sectionId) {
+    activateSection(sectionId, { updateHash: true });
 }
 
 /**

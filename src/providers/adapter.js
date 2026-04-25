@@ -73,7 +73,7 @@ export class ApiServiceAdapter {
 
     /**
      * 刷新认证令牌
-     * @returns {Promise<void>}
+     * @returns {Promise<boolean>} - 是否执行了实际的刷新操作
      */
     async refreshToken() {
         throw new Error("Method 'refreshToken()' must be implemented.");
@@ -81,7 +81,7 @@ export class ApiServiceAdapter {
 
     /**
      * 强制刷新认证令牌（不判断是否接近过期）
-     * @returns {Promise<void>}
+     * @returns {Promise<boolean>} - 是否执行了实际的刷新操作
      */
     async forceRefreshToken() {
         throw new Error("Method 'forceRefreshToken()' must be implemented.");
@@ -137,9 +137,10 @@ export class GeminiApiServiceAdapter extends ApiServiceAdapter {
         }
         if(this.isExpiryDateNear()===true){
             logger.info(`[Gemini] Expiry date is near, refreshing token...`);
-            return this.geminiApiService.initializeAuth(true);
+            await this.geminiApiService.initializeAuth(true);
+            return true;
         }
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
@@ -147,7 +148,8 @@ export class GeminiApiServiceAdapter extends ApiServiceAdapter {
             await this.geminiApiService.initialize();
         }
         logger.info(`[Gemini] Force refreshing token...`);
-        return this.geminiApiService.initializeAuth(true);
+        await this.geminiApiService.initializeAuth(true);
+        return true;
     }
 
     isExpiryDateNear() {
@@ -204,9 +206,10 @@ export class AntigravityApiServiceAdapter extends ApiServiceAdapter {
         }
         if (this.isExpiryDateNear() === true) {
             logger.info(`[Antigravity] Expiry date is near, refreshing token...`);
-            return this.antigravityApiService.initializeAuth(true);
+            await this.antigravityApiService.initializeAuth(true);
+            return true;
         }
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
@@ -214,7 +217,8 @@ export class AntigravityApiServiceAdapter extends ApiServiceAdapter {
             await this.antigravityApiService.initialize();
         }
         logger.info(`[Antigravity] Force refreshing token...`);
-        return this.antigravityApiService.initializeAuth(true);
+        await this.antigravityApiService.initializeAuth(true);
+        return true;
     }
 
     isExpiryDateNear() {
@@ -261,12 +265,12 @@ export class OpenAIApiServiceAdapter extends ApiServiceAdapter {
 
     async refreshToken() {
         // OpenAI API keys are typically static and do not require refreshing.
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
         // OpenAI API keys are typically static and do not require refreshing.
-        return Promise.resolve();
+        return false;
     }
 
     isExpiryDateNear() {
@@ -299,12 +303,12 @@ export class OpenAIResponsesApiServiceAdapter extends ApiServiceAdapter {
 
     async refreshToken() {
         // OpenAI API keys are typically static and do not require refreshing.
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
         // OpenAI API keys are typically static and do not require refreshing.
-        return Promise.resolve();
+        return false;
     }
 
     isExpiryDateNear() {
@@ -336,11 +340,11 @@ export class ClaudeApiServiceAdapter extends ApiServiceAdapter {
     }
 
     async refreshToken() {
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
-        return Promise.resolve();
+        return false;
     }
 
     isExpiryDateNear() {
@@ -425,9 +429,10 @@ export class KiroApiServiceAdapter extends ApiServiceAdapter {
         }
         if(this.isExpiryDateNear()===true){
             logger.info(`[Kiro] Expiry date is near, refreshing token...`);
-            return this.kiroApiService.initializeAuth(true);
+            await this.kiroApiService.initializeAuth(true);
+            return true;
         }
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
@@ -435,7 +440,8 @@ export class KiroApiServiceAdapter extends ApiServiceAdapter {
             await this.kiroApiService.initialize();
         }
         logger.info(`[Kiro] Force refreshing token...`);
-        return this.kiroApiService.initializeAuth(true);
+        await this.kiroApiService.initializeAuth(true);
+        return true;
     }
 
     isExpiryDateNear() {
@@ -501,9 +507,10 @@ export class QwenApiServiceAdapter extends ApiServiceAdapter {
         }
         if (this.isExpiryDateNear()) {
             logger.info(`[Qwen] Expiry date is near, refreshing token...`);
-            return this.qwenApiService._initializeAuth(true);
+            await this.qwenApiService._initializeAuth(true);
+            return true;
         }
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
@@ -511,7 +518,8 @@ export class QwenApiServiceAdapter extends ApiServiceAdapter {
             await this.qwenApiService.initialize();
         }
         logger.info(`[Qwen] Force refreshing token...`);
-        return this.qwenApiService._initializeAuth(true);
+        await this.qwenApiService._initializeAuth(true);
+        return true;
     }
 
     isExpiryDateNear() {
@@ -557,8 +565,9 @@ export class IFlowApiServiceAdapter extends ApiServiceAdapter {
         if (this.isExpiryDateNear()) {
             logger.info(`[iFlow] Expiry date is near, refreshing API key...`);
             await this.iflowApiService.initializeAuth(true);
+            return true;
         }
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
@@ -566,7 +575,8 @@ export class IFlowApiServiceAdapter extends ApiServiceAdapter {
             await this.iflowApiService.initialize();
         }
         logger.info(`[iFlow] Force refreshing API key...`);
-        return this.iflowApiService.initializeAuth(true);
+        await this.iflowApiService.initializeAuth(true);
+        return true;
     }
 
     isExpiryDateNear() {
@@ -609,8 +619,9 @@ export class CodexApiServiceAdapter extends ApiServiceAdapter {
         if (this.isExpiryDateNear()) {
             logger.info(`[Codex] Expiry date is near, refreshing token...`);
             await this.codexApiService.initializeAuth(true);
+            return true;
         }
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
@@ -618,7 +629,8 @@ export class CodexApiServiceAdapter extends ApiServiceAdapter {
             await this.codexApiService.initialize();
         }
         logger.info(`[Codex] Force refreshing token...`);
-        return this.codexApiService.initializeAuth(true);
+        await this.codexApiService.initializeAuth(true);
+        return true;
     }
 
     isExpiryDateNear() {
@@ -658,11 +670,11 @@ export class ForwardApiServiceAdapter extends ApiServiceAdapter {
     }
 
     async refreshToken() {
-        return Promise.resolve();
+        return false;
     }
 
     async forceRefreshToken() {
-        return Promise.resolve();
+        return false;
     }
 
     isExpiryDateNear() {
