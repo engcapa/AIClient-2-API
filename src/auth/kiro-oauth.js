@@ -1058,11 +1058,10 @@ export async function batchImportKiroRefreshTokensStream(refreshTokens, region =
  */
 export async function importAwsCredentials(credentials, skipDuplicateCheck = false) {
     try {
-        // 验证必需字段 - 需要四个字段都存在
+        // 验证必需字段 - accessToken 可选，会通过 refreshToken 刷新获取
         const missingFields = [];
         if (!credentials.clientId) missingFields.push('clientId');
         if (!credentials.clientSecret) missingFields.push('clientSecret');
-        if (!credentials.accessToken) missingFields.push('accessToken');
         if (!credentials.refreshToken) missingFields.push('refreshToken');
         
         if (missingFields.length > 0) {
@@ -1086,11 +1085,10 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
         
         logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} Importing AWS credentials...`);
         
-        // 准备凭据数据 - 四个字段都是必需的
+        // 准备凭据数据 - accessToken 可选，刷新成功后会覆盖
         const credentialsData = {
             clientId: credentials.clientId,
             clientSecret: credentials.clientSecret,
-            accessToken: credentials.accessToken,
             refreshToken: credentials.refreshToken,
             authMethod: credentials.authMethod || 'builder-id',
             // region: credentials.region || KIRO_REFRESH_CONSTANTS.DEFAULT_REGION,
