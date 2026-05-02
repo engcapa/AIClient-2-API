@@ -49,6 +49,7 @@ const KIRO_CONSTANTS = {
 
 // Per-model context window sizes for accurate token estimation
 const MODEL_CONTEXT_TOKENS = {
+    "claude-opus-4-7": 1000000,
     "claude-opus-4-6": 1000000,
     "claude-opus-4-5": 1000000,
     "claude-opus-4-5-20251101": 1000000,
@@ -849,6 +850,25 @@ async saveCredentialsToFile(filePath, newData) {
     }
 
     /**
+     * 清洗 tool_use 的 input 对象，移除空字符串 key 等不合法字段
+     * Kiro API 不接受空字符串 key 的 JSON 对象（如 {"": "value"}）
+     */
+    _sanitizeToolInput(input) {
+        if (!input || typeof input !== 'object' || Array.isArray(input)) {
+            return input;
+        }
+        const sanitized = {};
+        for (const [key, value] of Object.entries(input)) {
+            if (key === '') {
+                logger.info(`[Kiro] Removed empty-string key from tool input, value: ${String(value).substring(0, 100)}`);
+                continue;
+            }
+            sanitized[key] = value;
+        }
+        return sanitized;
+    }
+
+    /**
      * 统一处理内容，将不同格式的内容转换为文本
      * @param {any} content - 内容对象或数组
      * @returns {string} 处理后的文本
@@ -1242,7 +1262,7 @@ async saveCredentialsToFile(filePath, newData) {
                             thinkingText += (part.thinking ?? part.text ?? '');
                         } else if (part.type === 'tool_use') {
                             toolUses.push({
-                                input: part.input,
+                                input: this._sanitizeToolInput(part.input),
                                 name: part.name,
                                 toolUseId: part.id
                             });
@@ -1251,7 +1271,7 @@ async saveCredentialsToFile(filePath, newData) {
                 } else {
                     assistantResponseMessage.content = this.getContentText(message);
                 }
-                
+
                 if (thinkingText) {
                     assistantResponseMessage.content = assistantResponseMessage.content
                         ? `${KIRO_THINKING.START_TAG}${thinkingText}${KIRO_THINKING.END_TAG}\n\n${assistantResponseMessage.content}`
@@ -1262,7 +1282,7 @@ async saveCredentialsToFile(filePath, newData) {
                 if (toolUses.length > 0) {
                     assistantResponseMessage.toolUses = toolUses;
                 }
-                
+
                 history.push({ assistantResponseMessage });
             }
         }
@@ -1293,7 +1313,7 @@ async saveCredentialsToFile(filePath, newData) {
                         thinkingText += (part.thinking ?? part.text ?? '');
                     } else if (part.type === 'tool_use') {
                         assistantResponseMessage.toolUses.push({
-                            input: part.input,
+                            input: this._sanitizeToolInput(part.input),
                             name: part.name,
                             toolUseId: part.id
                         });
@@ -1343,7 +1363,7 @@ async saveCredentialsToFile(filePath, newData) {
                         });
                     } else if (part.type === 'tool_use') {
                         currentToolUses.push({
-                            input: part.input,
+                            input: this._sanitizeToolInput(part.input),
                             name: part.name,
                             toolUseId: part.id
                         });

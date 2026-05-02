@@ -4,12 +4,15 @@ import {
     API_ACTIONS,
     ENDPOINT_TYPE,
     getRequestBody,
-    getRateLimitCooldownRecoveryTime
+    getRateLimitCooldownRecoveryTime,
+    getProtocolPrefix,
+    MODEL_PROTOCOL_PREFIX
 } from '../utils/common.js';
 import { getProviderPoolManager, getApiServiceWithFallback } from './service-manager.js';
 import logger from '../utils/logger.js';
 import busboy from 'busboy';
-import { IMAGE_MODELS as SUPPORTED_IMAGE_MODELS } from '../providers/openai/codex-core.js';
+import { SUPPORTED_IMAGE_MODELS } from '../utils/constants.js';
+import { convertData } from '../convert/convert.js';
 
 const IMAGE_GEN_MAX_N = 4;
 const VALID_RESPONSE_FORMATS = new Set(['b64_json', 'url']);
@@ -125,11 +128,12 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
     const CONFIG = retryContext?.CONFIG ?? currentConfig;
     let slotProviderType = null;
     let slotUuid = null;
-    let model, n, response_format, size, codexRequestBody;
+    let model, n, response_format, size, codexRequestBody, virtualOpenAIRequest;
 
     try {
         if (retryContext?.parsedBody) {
-            ({model, n, response_format, size, codexRequestBody} = retryContext.parsedBody);
+            ({model, n, response_format, size, virtualOpenAIRequest} = retryContext.parsedBody);
+            codexRequestBody = virtualOpenAIRequest;
         } else {
             const body = await getRequestBody(req);
             model = body.model || 'gpt-image-2';
@@ -162,19 +166,22 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                 return;
             }
 
-            // 构造 Codex 格式请求，prepareRequestBody 会自动处理 gpt-image-2 → gpt-5.4 + image_generation tool
-            codexRequestBody = {
+            // 构造虚拟 OpenAI 对话请求，参考对话接口实现自动转换
+            virtualOpenAIRequest = {
                 model,
-                input: [{
-                    type: 'message',
-                    role: 'user',
-                    content: [{type: 'input_text', text: prompt}]
-                }],
-                ...(size ? {_imageSize: size} : {})
+                messages: [{ role: 'user', content: prompt }],
+                n,
+                size,
+                response_format,
+                _imageSize: size, // 兼容 Codex 内部使用的字段
+                _monitorRequestId: currentConfig._monitorRequestId // 注入监控 ID
             };
+
+            // 预留变量，在获取到 service 确认协议后再转换
+            codexRequestBody = virtualOpenAIRequest;
         }
 
-        // 从号池获取服务实例，acquireSlot 与其他接口保持一致
+        // 从号池获取服务实例
         const shouldUsePool = !!(providerPoolManager && CONFIG.providerPools);
         const result = await getApiServiceWithFallback(CONFIG, model, {acquireSlot: shouldUsePool});
         const service = result.service;
@@ -185,46 +192,89 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
             return;
         }
 
-        // 记录 slot 信息，供 finally 释放
+        // 记录 slot 信息
         if (shouldUsePool && result.uuid) {
             slotProviderType = result.actualProviderType || CONFIG.MODEL_PROVIDER;
             slotUuid = result.uuid;
         }
+        
+        const finalProviderProtocol = getProtocolPrefix(slotProviderType || CONFIG.MODEL_PROVIDER);
+        const fromProvider = MODEL_PROTOCOL_PREFIX.OPENAI;
+        const toProvider = slotProviderType || CONFIG.MODEL_PROVIDER;
 
-        logger.info(`[Image Generation] model=${model}, n=${n}, response_format=${response_format}${size ? `, size=${size}` : ''}`);
+        // 执行自动转换：OpenAI -> 目标协议
+        const fromProtocol = MODEL_PROTOCOL_PREFIX.OPENAI;
+        if (fromProtocol !== finalProviderProtocol) {
+            logger.info(`[Image Generation] Converting request from ${fromProtocol} to ${finalProviderProtocol}`);
+            codexRequestBody = convertData(codexRequestBody, 'request', fromProvider, toProvider, model, currentConfig._monitorRequestId);
+            
+            // 保持以 _ 开头的内部属性
+            Object.keys(virtualOpenAIRequest).forEach(key => {
+                if (key.startsWith('_') && codexRequestBody[key] === undefined) {
+                    codexRequestBody[key] = virtualOpenAIRequest[key];
+                }
+            });
+        }
+
+        logger.info(`[Image Generation] model=${model}, protocol=${finalProviderProtocol}, n=${n}, response_format=${response_format}${size ? `, size=${size}` : ''}`);
 
         // 串行发起 n 张图请求，每张独立占用一次上游调用，与号池 slot 计数对应
         const data = [];
+        const responses = [];
         for (let i = 0; i < n; i++) {
-            const completedEvent = await service.generateContent(model, {...codexRequestBody});
-            const output = completedEvent?.response?.output || [];
-            for (const item of output) {
-                if (item.type === 'image_generation_call' && item.result) {
-                    const dataItem = response_format === 'url'
-                        ? { url: `data:image/${item.output_format || 'png'};base64,${item.result}` }
-                        : { b64_json: item.result };
-                    if (item.revised_prompt) dataItem.revised_prompt = item.revised_prompt;
-                    data.push(dataItem);
-                }
-            }
+            const response = await service.generateContent(model, {...codexRequestBody});
+            responses.push(response);
+            const extracted = extractImagesFromServiceResponse(response, finalProviderProtocol, response_format);
+            data.push(...extracted);
         }
 
         if (data.length === 0) {
-            const rejectionText = extractRejectionMessage(completedEvents);
-            if (rejectionText) {
-                logger.warn(`[Image Generation] Content policy rejection: ${rejectionText.slice(0, 100)}`);
+            // 检查是否有拒绝消息
+            const rejection = extractRejectionMessage(responses, finalProviderProtocol);
+            if (rejection) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: { code: 'content_policy_violation', message: rejectionText, type: 'invalid_request_error' } }));
+                res.end(JSON.stringify({ error: { message: `Image generation rejected: ${rejection}`, type: 'invalid_request_error' } }));
             } else {
-                logger.error('[Image Generation] No image found in response output');
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: { message: 'Image generation failed: no image in response', type: 'server_error' } }));
             }
             return;
         }
 
+        const clientResponse = { created: Math.floor(Date.now() / 1000), data };
+
+        // 监控钩子：内容生成后与一元响应
+        if (currentConfig._monitorRequestId) {
+            try {
+                const { getPluginManager } = await import('../core/plugin-manager.js');
+                const pluginManager = getPluginManager();
+                if (pluginManager) {
+                    await pluginManager.executeHook('onContentGenerated', {
+                        ...currentConfig,
+                        originalRequestBody: { model, prompt, n, size, response_format },
+                        processedRequestBody: codexRequestBody,
+                        fromProvider,
+                        toProvider,
+                        model,
+                        isStream: false
+                    });
+
+                    await pluginManager.executeHook('onUnaryResponse', {
+                        nativeResponse: responses.length === 1 ? responses[0] : responses,
+                        clientResponse,
+                        fromProvider,
+                        toProvider,
+                        model,
+                        requestId: currentConfig._monitorRequestId
+                    });
+                }
+            } catch (e) {
+                logger.error('[Image Generation] Hook error:', e.message);
+            }
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ created: Math.floor(Date.now() / 1000), data }));
+        res.end(JSON.stringify(clientResponse));
     } catch (error) {
         logger.error('[Image Generation] Error:', error.message);
 
@@ -261,7 +311,7 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                     CONFIG,
                     currentRetry: currentRetry + 1,
                     maxRetries,
-                    parsedBody: {model, n, response_format, size, codexRequestBody}
+                    parsedBody: {model, n, response_format, size, virtualOpenAIRequest}
                 });
             } catch (retryError) {
                 logger.error('[Image Generation Retry] Failed to get alternative service:', retryError.message);
@@ -281,16 +331,36 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
 }
 
 /**
- * Extract assistant rejection text from Codex output items.
+ * Extract assistant rejection text from different provider responses.
  * Returns the text if a policy/safety rejection message is found, otherwise null.
  */
-function extractRejectionMessage(completedEvents) {
-    for (const completedEvent of completedEvents) {
-        const output = completedEvent?.response?.output || [];
-        for (const item of output) {
-            if (item.type === 'message' && item.role === 'assistant') {
-                const textPart = (item.content || []).find(c => c.type === 'output_text' && c.text);
-                if (textPart?.text) return textPart.text;
+function extractRejectionMessage(responses, providerProtocol) {
+    for (const response of responses) {
+        // Codex/OpenAI Responses style
+        if (providerProtocol === MODEL_PROTOCOL_PREFIX.CODEX || providerProtocol === MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES) {
+            const output = response?.response?.output || response?.output || [];
+            for (const item of output) {
+                if (item.type === 'message' && item.role === 'assistant') {
+                    const textPart = (item.content || []).find(c => c.type === 'output_text' && c.text);
+                    if (textPart?.text) return textPart.text;
+                }
+            }
+        }
+        
+        // Grok style
+        if (providerProtocol === MODEL_PROTOCOL_PREFIX.GROK) {
+            if (response.message) return response.message;
+            if (response.modelResponse?.message) return response.modelResponse.message;
+        }
+        
+        // Gemini style
+        if (providerProtocol === MODEL_PROTOCOL_PREFIX.GEMINI) {
+            const candidates = response?.response?.candidates || response?.candidates || [];
+            for (const cand of candidates) {
+                const parts = cand.content?.parts || [];
+                for (const part of parts) {
+                    if (part.text) return part.text;
+                }
             }
         }
     }
@@ -405,18 +475,21 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
         const {buffer, mimetype} = imageFile;
         const imageUrl = `data:${mimetype || 'image/png'};base64,${buffer.toString('base64')}`;
 
-        // 构造 Codex 请求：input_image + input_text，prepareRequestBody 自动处理 gpt-image-2 → gpt-5.4 + image_generation tool
-        const codexRequestBody = {
+        // 构造虚拟 OpenAI 对话请求，参考对话接口实现自动转换
+        const virtualOpenAIRequest = {
             model,
-            input: [{
-                type: 'message',
+            messages: [{
                 role: 'user',
                 content: [
-                    { type: 'input_image', image_url: imageUrl },
-                    { type: 'input_text', text: prompt }
+                    { type: 'text', text: prompt },
+                    { type: 'image_url', image_url: { url: imageUrl } }
                 ]
             }],
-            ...(size ? { _imageSize: size } : {})
+            n,
+            size,
+            response_format,
+            _imageSize: size,
+            _monitorRequestId: currentConfig._monitorRequestId // 注入监控 ID
         };
 
         const shouldUsePool = !!(providerPoolManager && currentConfig.providerPools);
@@ -434,43 +507,85 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
             slotUuid = result.uuid;
         }
 
-        logger.info(`[Image Edits] model=${model}, n=${n}, response_format=${response_format}, imageSize=${Math.round(buffer.length / 1024)}KB${size ? `, size=${size}` : ''}`);
+        const finalProviderProtocol = getProtocolPrefix(slotProviderType || currentConfig.MODEL_PROVIDER);
+        const fromProvider = MODEL_PROTOCOL_PREFIX.OPENAI;
+        const toProvider = slotProviderType || currentConfig.MODEL_PROVIDER;
+
+        // 执行自动转换：OpenAI -> 目标协议
+        let codexRequestBody = virtualOpenAIRequest;
+        const fromProtocol = MODEL_PROTOCOL_PREFIX.OPENAI;
+        if (fromProtocol !== finalProviderProtocol) {
+            logger.info(`[Image Edits] Converting request from ${fromProtocol} to ${finalProviderProtocol}`);
+            codexRequestBody = convertData(codexRequestBody, 'request', fromProtocol, toProvider, model, currentConfig._monitorRequestId);
+            
+            // 保持以 _ 开头的内部属性
+            Object.keys(virtualOpenAIRequest).forEach(key => {
+                if (key.startsWith('_') && codexRequestBody[key] === undefined) {
+                    codexRequestBody[key] = virtualOpenAIRequest[key];
+                }
+            });
+        }
+
+        logger.info(`[Image Edits] model=${model}, protocol=${finalProviderProtocol}, n=${n}, response_format=${response_format}, imageSize=${Math.round(buffer.length / 1024)}KB${size ? `, size=${size}` : ''}`);
 
         const imageRequests = Array.from({ length: n }, () =>
             service.generateContent(model, { ...codexRequestBody })
         );
-        const completedEvents = await Promise.all(imageRequests);
-
+        const responses = await Promise.all(imageRequests);
         const data = [];
-        for (const completedEvent of completedEvents) {
-            const output = completedEvent?.response?.output || [];
-            for (const item of output) {
-                if (item.type === 'image_generation_call' && item.result) {
-                    const dataItem = response_format === 'url'
-                        ? { url: `data:image/${item.output_format || 'png'};base64,${item.result}` }
-                        : { b64_json: item.result };
-                    if (item.revised_prompt) dataItem.revised_prompt = item.revised_prompt;
-                    data.push(dataItem);
-                }
-            }
+
+        for (let i = 0; i < responses.length; i++) {
+            const extracted = extractImagesFromServiceResponse(responses[i], finalProviderProtocol, response_format);
+            data.push(...extracted);
         }
 
         if (data.length === 0) {
-            const rejectionText = extractRejectionMessage(completedEvents);
-            if (rejectionText) {
-                logger.warn(`[Image Edits] Content policy rejection: ${rejectionText.slice(0, 100)}`);
+            // 检查是否有拒绝消息
+            const rejection = extractRejectionMessage(responses, finalProviderProtocol);
+            if (rejection) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: { code: 'content_policy_violation', message: rejectionText, type: 'invalid_request_error' } }));
+                res.end(JSON.stringify({ error: { message: `Image editing rejected: ${rejection}`, type: 'invalid_request_error' } }));
             } else {
-                logger.error('[Image Edits] No image found in response output');
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: { message: 'Image editing failed: no image in response', type: 'server_error' } }));
             }
             return;
         }
 
+        const clientResponse = { created: Math.floor(Date.now() / 1000), data };
+
+        // 监控钩子
+        if (currentConfig._monitorRequestId) {
+            try {
+                const { getPluginManager } = await import('../core/plugin-manager.js');
+                const pluginManager = getPluginManager();
+                if (pluginManager) {
+                    await pluginManager.executeHook('onContentGenerated', {
+                        ...currentConfig,
+                        originalRequestBody: { model, prompt, n, size, response_format },
+                        processedRequestBody: codexRequestBody,
+                        fromProvider,
+                        toProvider,
+                        model,
+                        isStream: false
+                    });
+
+                    await pluginManager.executeHook('onUnaryResponse', {
+                        nativeResponse: responses.length === 1 ? responses[0] : responses,
+                        clientResponse,
+                        fromProvider,
+                        toProvider,
+                        model,
+                        requestId: currentConfig._monitorRequestId
+                    });
+                }
+            } catch (e) {
+                logger.error('[Image Edits] Hook error:', e.message);
+            }
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ created: Math.floor(Date.now() / 1000), data }));
+        res.end(JSON.stringify(clientResponse));
     } catch (error) {
         logger.error('[Image Edits] Error:', error.message);
         if (!res.writableEnded) {
@@ -482,6 +597,74 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
             providerPoolManager.releaseSlot(slotProviderType, slotUuid);
         }
     }
+}
+
+/**
+ * Extract image data from a service's generateContent response.
+ * Handles different provider output formats.
+ */
+function extractImagesFromServiceResponse(response, providerProtocol, responseFormat) {
+    const data = [];
+    
+    if (providerProtocol === MODEL_PROTOCOL_PREFIX.CODEX || providerProtocol === MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES) {
+        const output = response?.response?.output || response?.output || [];
+        for (const item of output) {
+            if (item.type === 'image_generation_call' && item.result) {
+                const dataItem = responseFormat === 'url'
+                    ? { url: `data:image/${item.output_format || 'png'};base64,${item.result}` }
+                    : { b64_json: item.result };
+                if (item.revised_prompt) dataItem.revised_prompt = item.revised_prompt;
+                data.push(dataItem);
+            }
+        }
+    } else if (providerProtocol === MODEL_PROTOCOL_PREFIX.GROK) {
+        // Grok returns collected object with generatedImageUrls or cardAttachments
+        const imageUrls = response.generatedImageUrls || [];
+        for (const url of imageUrls) {
+            if (responseFormat === 'url') {
+                data.push({ url });
+            } else if (url.startsWith('data:image/')) {
+                const b64 = url.split(',')[1];
+                data.push({ b64_json: b64 });
+            } else {
+                data.push({ url });
+            }
+        }
+        // Also check cardAttachments for images
+        const cards = response.cardAttachments || [];
+        for (const card of cards) {
+            try {
+                const jsonData = typeof card.jsonData === 'string' ? JSON.parse(card.jsonData) : card.jsonData;
+                const imgUrl = jsonData?.image?.original;
+                if (imgUrl) {
+                    if (responseFormat === 'url') {
+                        data.push({ url: imgUrl });
+                    } else if (imgUrl.startsWith('data:image/')) {
+                        const b64 = imgUrl.split(',')[1];
+                        data.push({ b64_json: b64 });
+                    } else {
+                        data.push({ url: imgUrl });
+                    }
+                }
+            } catch (e) {}
+        }
+    } else if (providerProtocol === MODEL_PROTOCOL_PREFIX.GEMINI) {
+        // Gemini/Antigravity returns candidates with parts containing inlineData (images)
+        const candidates = response?.response?.candidates || response?.candidates || [];
+        for (const cand of candidates) {
+            const parts = cand.content?.parts || [];
+            for (const part of parts) {
+                if (part.inlineData) {
+                    const dataItem = responseFormat === 'url'
+                        ? { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` }
+                        : { b64_json: part.inlineData.data };
+                    data.push(dataItem);
+                }
+            }
+        }
+    }
+    
+    return data;
 }
 
 /**

@@ -58,7 +58,7 @@ export class ProviderPoolManager {
         'openai-codex-oauth': 'gpt-5-codex-mini',
         'openaiResponses-custom': 'gpt-4o-mini',
         'forward-api': 'gpt-4o-mini',
-        'grok-custom': 'grok-4.1-mini',
+        'grok-web': 'grok-4.1-mini',
     };
 
     constructor(providerPools, options = {}) {
@@ -797,8 +797,8 @@ export class ProviderPoolManager {
                         providerConfig.lastUsed = null;
                         providerConfig.usageCount = 0;
                         providerConfig.errorCount = 0;
-                        providerConfig.lastErrorTime = null;
-                        providerConfig.lastErrorMessage = null;
+                        // providerConfig.lastErrorTime = null;
+                        // providerConfig.lastErrorMessage = null;
                     } else if (syncFromConfig) {
                         // 强制同步：从配置中恢复统计数据
                         providerConfig.lastUsed = providerConfig.lastUsed || null;
