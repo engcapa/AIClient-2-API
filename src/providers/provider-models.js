@@ -44,8 +44,6 @@ export const PROVIDER_MODELS = {
         'gemini-2.5-flash',
         'gemini-2.5-flash-lite',
         'gemini-2.5-pro',
-        'gemini-2.5-pro-preview-06-05',
-        'gemini-2.5-flash-preview-09-2025',
         'gemini-3-pro-preview',
         'gemini-3-flash-preview',
         'gemini-3.1-pro-preview',
@@ -104,8 +102,6 @@ export const PROVIDER_MODELS = {
         'claude-opus-4-5-20251101',
         'claude-sonnet-4-5',
         'claude-sonnet-4-5-20250929',
-        'claude-sonnet-4-20250514',
-        'claude-3-7-sonnet-20250219',
         // Third-party models
         'auto',
         'deepseek-3.2',
@@ -178,8 +174,7 @@ export const PROVIDER_MODELS = {
 export const MANAGED_MODEL_LIST_PROVIDERS = [
     'openai-custom',
     'openaiResponses-custom',
-    'claude-custom',
-    'gemini-custom'
+    'claude-custom'
 ];
 
 export function getManagedModelListProviderType(providerType) {
