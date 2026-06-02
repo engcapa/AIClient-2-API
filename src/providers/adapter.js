@@ -1,6 +1,7 @@
 import { OpenAIResponsesApiService } from './openai/openai-responses-core.js';
 import { GeminiApiService } from './gemini/gemini-core.js';
 import { AntigravityApiService } from './gemini/antigravity-core.js';
+import { GeminiCustomApiService } from './gemini/gemini-custom-core.js';
 import { OpenAIApiService } from './openai/openai-core.js';
 import { ClaudeApiService } from './claude/claude-core.js';
 import { KiroApiService } from './claude/claude-kiro.js';
@@ -344,6 +345,39 @@ export class ClaudeApiServiceAdapter extends ApiServiceAdapter {
 
     async forceRefreshToken() {
         return false;
+    }
+
+    isExpiryDateNear() {
+        return false;
+    }
+}
+
+// Gemini Custom API 服务适配器
+export class GeminiCustomApiServiceAdapter extends ApiServiceAdapter {
+    constructor(config) {
+        super();
+        this.geminiCustomApiService = new GeminiCustomApiService(config);
+    }
+
+    async generateContent(model, requestBody) {
+        return await this.geminiCustomApiService.generateContent(model, requestBody);
+    }
+
+    async *generateContentStream(model, requestBody) {
+        const stream = this.geminiCustomApiService.generateContentStream(model, requestBody);
+        yield* stream;
+    }
+
+    async listModels() {
+        return await this.geminiCustomApiService.listModels();
+    }
+
+    async refreshToken() {
+        return Promise.resolve();
+    }
+
+    async forceRefreshToken() {
+        return Promise.resolve();
     }
 
     isExpiryDateNear() {
@@ -707,6 +741,8 @@ registerAdapter(MODEL_PROVIDER.OPENAI_CUSTOM_RESPONSES, OpenAIResponsesApiServic
 registerAdapter(MODEL_PROVIDER.CLAUDE_CUSTOM, ClaudeApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.GEMINI_CLI, GeminiApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.ANTIGRAVITY, AntigravityApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.CLAUDE_CUSTOM, ClaudeApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.GEMINI_CUSTOM, GeminiCustomApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.KIRO_API, KiroApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.CODEX_API, CodexApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.GROK_WEB, GrokApiServiceAdapter);
