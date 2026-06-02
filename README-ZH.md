@@ -60,6 +60,16 @@
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
+      <a href="https://apikey.fun/register?aff=AIClient2API">
+        <img src="static/apikey.fun.png" alt="APIKEY.FUN Sponsor" width="180">
+      </a>
+    </td>
+    <td width="75%" align="left" valign="middle">
+      感谢 APIKEY.FUN 赞助本项目！APIKEY.FUN 是一家专业的企业级 AI 中转站，致力于为企业和个人开发者提供稳定、高效、低成本的其他 AI 模型 API 接入服务。平台支持 Claude、OpenAI、Gemini 等主流热门模型，价格低至官方原价的 7%。通过<a href="https://apikey.fun/register?aff=AIClient2API">本项目专属链接</a>注册，还可享受最高 <strong>充值永久 95 折</strong> 专属优惠。
+    </td>
+  </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
       <a href="https://visioncoder.com">
         <img src="static/visioncoder.png" alt="VisionCoder Sponsor" width="180">
       </a>
@@ -70,6 +80,17 @@
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
+      <a href="https://www.atlascloud.ai/console/coding-plan">
+        <img src="static/atlascloud.png" alt="Atlas Cloud Sponsor" width="180">
+      </a>
+    </td>
+    <td width="75%" align="left" valign="middle">
+      感谢 Atlas Cloud 赞助本项目！Atlas Cloud 是一款全模态 AI 推理平台，为开发者提供单一的 AI API 以轻松接入视频生成、图像生成和大语言模型 API。无需管理多个供应商集成，您只需连接一次，即可统一访问跨所有模态的 300 多种精选模型。欢迎查看 Atlas Cloud 全新的 <a href="https://www.atlascloud.ai/console/coding-plan">编码计划促销活动 (coding plan)</a>，以获取更具性价比的 API 接入服务。
+    </td>
+  </tr>
+  <!--
+  <tr>
+    <td width="25%" align="center" valign="middle">
       <a href="https://www.aicodemirror.com/register?invitecode=5BUE62">
         <img src="static/aicodemirror.jpg" alt="AICodeMirror Sponsor" width="180">
       </a>
@@ -78,6 +99,7 @@
       感谢 AICodeMirror 赞助本项目！AICodeMirror 为 Claude Code / Codex / Gemini CLI 提供官方高稳定性中转服务，具备企业级并发能力、快速开票和 7/24 专属技术支持。Claude Code / Codex / Gemini 官方渠道价格仅为原价的 38% / 2% / 9%，充值还有额外优惠！AICodeMirror 为 AIClient2API 用户提供专属福利：<a href="https://www.aicodemirror.com/register?invitecode=5BUE62">通过此链接注册</a>即可享受首充 <strong>8折（20% off）</strong> 优惠，企业客户最高可享 75折（25% off）！
     </td>
   </tr>
+  -->
 
 <!--
   <tr>

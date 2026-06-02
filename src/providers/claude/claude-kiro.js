@@ -154,6 +154,7 @@ function normalizeKiroToolInput(input) {
 
 // Per-model context window sizes for accurate token estimation
 const MODEL_CONTEXT_TOKENS = {
+    "claude-opus-4-8": 1000000,
     "claude-opus-4-7": 1000000,
     "claude-opus-4-6": 1000000,
     "claude-opus-4-5": 1000000,
@@ -211,6 +212,7 @@ const KIRO_MODELS = getProviderModels(MODEL_PROVIDER.KIRO_API);
 // 完整的模型映射表
 const FULL_MODEL_MAPPING = {
     "claude-haiku-4-5":"claude-haiku-4.5",
+    "claude-opus-4-8":"claude-opus-4.8",
     "claude-opus-4-7":"claude-opus-4.7",
     "claude-opus-4-6":"claude-opus-4.6",
     "claude-sonnet-4-6":"claude-sonnet-4.6",
@@ -939,6 +941,38 @@ async saveCredentialsToFile(filePath, newData) {
         return getContentTextUtil(message);
     }
 
+    _extractTextAndImagesFromContent(content, totalMessages = null) {
+        const result = { text: '', images: [], imageCount: 0 };
+        const shouldKeepImages = totalMessages === null ? true : (totalMessages - 1) <= 5;
+        if (Array.isArray(content)) {
+            for (const part of content) {
+                if (part.type === 'text') {
+                    result.text += part.text || '';
+                } else if (part.type === 'image' && part.source?.data) {
+                    result.imageCount++;
+                    if (shouldKeepImages) result.images.push({
+                        format: part.source.media_type.split('/')[1],
+                        source: { bytes: part.source.data }
+                    });
+                } else if (part.type === 'image_url' && part.image_url) {
+                    const imageUrl = typeof part.image_url === 'string' ? part.image_url : part.image_url.url;
+                    if (imageUrl && imageUrl.startsWith('data:')) {
+                        const [header, data] = imageUrl.split(',');
+                        const mediaType = header.split(':')[1]?.split(';')[0] || 'image/jpeg';
+                        result.imageCount++;
+                        if (shouldKeepImages) result.images.push({
+                            format: mediaType.split('/')[1] || 'jpeg',
+                            source: { bytes: data }
+                        });
+                    }
+                }
+            }
+            return result;
+        }
+        result.text = getContentTextUtil({ content });
+        return result;
+    }
+
     /**
      * 清洗 tool_use 的 input 对象，移除空字符串 key 等不合法字段
      * Kiro API 不接受空字符串 key 的 JSON 对象（如 {"": "value"}）
@@ -1053,7 +1087,10 @@ async saveCredentialsToFile(filePath, newData) {
                                </CRITICAL_OVERRIDE>
                                <identity>
                                 你是 {{identity}}，一名拥有多种编程语言、框架、设计模式和最佳实践丰富知识的高级软件工程师。
-                               </identity>`;
+                               </identity>
+                               <tool_use_guidelines>
+                                写数据时需要强制拆小，使用分段写入/编辑工具，而不是一次性写入或者编辑。
+                               </tool_use_guidelines>`;
         
         let systemPrompt = this.getContentText(inSystemPrompt);
         // 在 systemPrompt 前面添加内置前缀
@@ -1247,14 +1284,23 @@ async saveCredentialsToFile(filePath, newData) {
             if (processedMessages[0].role === 'user' && processedMessages.length === 1) {
                 prependSystemToCurrentMessage = true;
             } else if (processedMessages[0].role === 'user') {
-                let firstUserContent = this.getContentText(processedMessages[0]);
-                history.push({
+                const firstUserPayload = this._extractTextAndImagesFromContent(processedMessages[0].content, processedMessages.length);
+                const firstImagePlaceholder = firstUserPayload.imageCount > 0 && firstUserPayload.images.length === 0
+                    ? `[此消息包含 ${firstUserPayload.imageCount} 张图片，已在历史记录中省略]`
+                    : '';
+                const firstHistoryMsg = {
                     userInputMessage: {
-                        content: `${systemPrompt}\n\n${firstUserContent}`,
+                        content: firstUserPayload.text
+                            ? `${systemPrompt}\n\n${firstUserPayload.text}${firstImagePlaceholder ? `\n${firstImagePlaceholder}` : ''}`
+                            : `${systemPrompt}${firstImagePlaceholder ? `\n${firstImagePlaceholder}` : ''}`,
                         modelId: codewhispererModel,
                         origin: KIRO_CONSTANTS.ORIGIN_AI_EDITOR,
                     }
-                });
+                };
+                if (firstUserPayload.images.length > 0) {
+                    firstHistoryMsg.userInputMessage.images = firstUserPayload.images;
+                }
+                history.push(firstHistoryMsg);
                 startIndex = 1; // Start processing from the second message
             } else {
                 // If the first message is not a user message, or if there's no initial user message,

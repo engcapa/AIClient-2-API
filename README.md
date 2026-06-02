@@ -60,6 +60,16 @@
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
+      <a href="https://apikey.fun/register?aff=AIClient2API">
+        <img src="static/apikey.fun.png" alt="APIKEY.FUN Sponsor" width="180">
+      </a>
+    </td>
+    <td width="75%" align="left" valign="middle">
+      Thanks to APIKEY.FUN for sponsoring this project! APIKEY.FUN is a professional enterprise-grade AI relay station, dedicated to providing stable, efficient, and low-cost AI model API access services for enterprises and individual developers. The platform supports mainstream popular models such as Claude, OpenAI, and Gemini, with prices as low as 7% of the official original price. Register through the <a href="https://apikey.fun/register?aff=AIClient2API">project's exclusive link</a> to enjoy an exclusive discount of up to <strong>5% off (95% of original price)</strong> for permanent recharges.
+    </td>
+  </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
       <a href="https://visioncoder.com">
         <img src="static/visioncoder.png" alt="VisionCoder Sponsor" width="180">
       </a>
@@ -70,6 +80,17 @@
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
+      <a href="https://www.atlascloud.ai/console/coding-plan">
+        <img src="static/atlascloud.png" alt="Atlas Cloud Sponsor" width="180">
+      </a>
+    </td>
+    <td width="75%" align="left" valign="middle">
+      Thanks to Atlas Cloud for sponsoring this project! Atlas Cloud is a full-modal AI inference platform that gives developers a single AI API to access video generation, image generation, and LLM APIs. Instead of managing multiple vendor integrations, you connect once and get unified access to 300+ curated models across all modalities. Check out Atlas Cloud's new <a href="https://www.atlascloud.ai/console/coding-plan">coding plan promotion</a> for more budget-friendly API access.
+    </td>
+  </tr>
+  <!--
+  <tr>
+    <td width="25%" align="center" valign="middle">
       <a href="https://www.aicodemirror.com/register?invitecode=5BUE62">
         <img src="static/aicodemirror.jpg" alt="AICodeMirror Sponsor" width="180">
       </a>
@@ -78,6 +99,7 @@
       Thanks to AICodeMirror for sponsoring this project! AICodeMirror provides official high-stability relay services for Claude Code / Codex / Gemini CLI, with enterprise-grade concurrency, fast invoicing, and 24/7 dedicated technical support. Claude Code / Codex / Gemini official channels at 38% / 2% / 9% of original price, with extra discounts on top-ups! AICodeMirror offers special benefits for AIClient2API users: <a href="https://www.aicodemirror.com/register?invitecode=5BUE62">register via this link</a> to enjoy <strong>20% off</strong> your first top-up, and enterprise customers can get up to 25% off!
     </td>
   </tr>
+  -->
 
 <!--
   <tr>

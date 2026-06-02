@@ -391,6 +391,10 @@ export function getProtocolPrefix(provider) {
     if (provider === 'openai-codex-oauth') {
         return 'codex';
     }
+    // Special case for AtlasCloud - it uses openai protocol
+    if (provider === 'atlascloud' || provider.startsWith('atlascloud-')) {
+        return 'openai';
+    }
 
     const hyphenIndex = provider.indexOf('-');
     if (hyphenIndex !== -1) {
@@ -537,16 +541,51 @@ export function getClientIp(req, config = {}) {
 /**
  * Reads the entire request body from an HTTP request.
  * @param {http.IncomingMessage} req - The HTTP request object.
+ * @param {{ maxBytes?: number }} options - Optional body limits.
  * @returns {Promise<Object>} A promise that resolves with the parsed JSON request body.
  * @throws {Error} If the request body is not valid JSON.
  */
-export function getRequestBody(req) {
+export function getRequestBody(req, options = {}) {
     return new Promise((resolve, reject) => {
         let body = '';
+        let receivedBytes = 0;
+        let settled = false;
+        const DEFAULT_MAX_BYTES = 10 * 1024 * 1024; // Default 10MB limit
+        const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : DEFAULT_MAX_BYTES;
+
+        // 1. Quick check Content-Length header
+        const contentLength = parseInt(req.headers['content-length'] || '0', 10);
+        if (!isNaN(contentLength) && contentLength > maxBytes) {
+            req.resume(); // drain & discard
+            const error = new Error(`Request body too large. Maximum size is ${maxBytes} bytes.`);
+            error.statusCode = 413;
+            error.code = 'BODY_TOO_LARGE';
+            return reject(error);
+        }
+
+        const fail = (error) => {
+            if (settled) return;
+            settled = true;
+            if (typeof req.destroy === 'function') {
+                req.destroy();
+            }
+            reject(error);
+        };
+
         req.on('data', chunk => {
+            if (settled) return;
+            receivedBytes += chunk.length;
+            if (maxBytes && receivedBytes > maxBytes) {
+                const error = new Error(`Request body too large. Maximum size is ${maxBytes} bytes.`);
+                error.statusCode = 413;
+                fail(error);
+                return;
+            }
             body += chunk.toString();
         });
         req.on('end', () => {
+            if (settled) return;
+            settled = true;
             if (!body) {
                 return resolve({});
             }
@@ -557,7 +596,7 @@ export function getRequestBody(req) {
             }
         });
         req.on('error', err => {
-            reject(err);
+            fail(err);
         });
     });
 }
