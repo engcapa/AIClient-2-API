@@ -8,7 +8,7 @@ import os from 'os';
 import {refreshCodexTokensWithRetry} from '../../auth/oauth-handlers.js';
 import {getProviderPoolManager} from '../../services/service-manager.js';
 import {configureTLSSidecar, isTLSSidecarEnabledForProvider} from '../../utils/proxy-utils.js';
-import {MODEL_PROVIDER, formatExpiryLog} from '../../utils/common.js';
+import {MODEL_PROVIDER, formatExpiryLog, normalizeProviderErrorMessage} from '../../utils/common.js';
 import {getProxyConfigForProvider} from '../../utils/proxy-utils.js';
 import {getProviderModels} from '../provider-models.js';
 
@@ -228,6 +228,7 @@ export class CodexApiService {
         } catch (error) {
             if (error.response?.status === 401) {
                 logger.info('[Codex] Received 401. Triggering background refresh...');
+                await normalizeProviderErrorMessage(error, { status: 401, context: 'non-stream' });
 
                 // 触发后台异步刷新
                 this.triggerBackgroundRefresh();
@@ -238,8 +239,10 @@ export class CodexApiService {
                 error.skipErrorCount = true;
                 throw error;
             } else {
-                const errBody = error.response?.data ? String(error.response.data).slice(0, 500) : '';
-                logger.error(`[Codex] Error calling non-stream API (Status: ${error.response?.status}, Code: ${error.code || 'N/A'}): ${error.message}${errBody ? ` | body: ${errBody}` : ''}`);
+                if (error.response?.status) {
+                    await normalizeProviderErrorMessage(error, { status: error.response.status, context: 'non-stream' });
+                }
+                logger.error(`[Codex] Error calling non-stream API (Status: ${error.response?.status}, Code: ${error.code || 'N/A'}): ${error.message}`);
                 throw error;
             }
         }
@@ -299,6 +302,7 @@ export class CodexApiService {
         } catch (error) {
             if (error.response?.status === 401) {
                 logger.info('[Codex] Received 401 during stream. Triggering background refresh...');
+                await normalizeProviderErrorMessage(error, { status: 401, context: 'stream' });
 
                 // 触发后台异步刷新
                 this.triggerBackgroundRefresh();
@@ -309,6 +313,9 @@ export class CodexApiService {
                 error.skipErrorCount = true;
                 throw error;
             } else {
+                if (error.response?.status) {
+                    await normalizeProviderErrorMessage(error, { status: error.response.status, context: 'stream' });
+                }
                 logger.error(`[Codex] Error calling streaming API (Status: ${error.response?.status}, Code: ${error.code || 'N/A'}):`, error.message);
                 throw error;
             }

@@ -369,7 +369,7 @@ function extractRejectionMessage(responses, providerProtocol) {
 
 /**
  * Parse multipart/form-data from a raw http.IncomingMessage via busboy.
- * Returns { fields: {key: string}, files: {key: {buffer, mimetype}} }
+ * Returns { fields: {key: string}, files: {key: file|file[]}, fileEntries: [{name, file}] }
  * File buffers are collected in memory; mask field is accepted but ignored.
  */
 function parseMultipartForm(req) {
@@ -382,6 +382,7 @@ function parseMultipartForm(req) {
         const bb = busboy({ headers: req.headers, limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB cap
         const fields = {};
         const files = {};
+        const fileEntries = [];
 
         let settled = false;
         const rejectOnce = (err) => {
@@ -401,12 +402,24 @@ function parseMultipartForm(req) {
 
         bb.on('file', (name, stream, info) => {
             const chunks = [];
+            const fileEntry = { name, file: null };
+            fileEntries.push(fileEntry);
             stream.on('data', chunk => chunks.push(chunk));
-            stream.on('end', () => { files[name] = { buffer: Buffer.concat(chunks), mimetype: info.mimeType }; });
+            stream.on('end', () => {
+                const file = { buffer: Buffer.concat(chunks), mimetype: info.mimeType };
+                fileEntry.file = file;
+                if (!files[name]) {
+                    files[name] = file;
+                } else if (Array.isArray(files[name])) {
+                    files[name].push(file);
+                } else {
+                    files[name] = [files[name], file];
+                }
+            });
             stream.on('error', rejectOnce);
         });
 
-        bb.on('close', () => resolveOnce({fields, files}));
+        bb.on('close', () => resolveOnce({fields, files, fileEntries}));
         bb.on('error', rejectOnce);
 
         // 客户端提前断连时 req 不会触发 'end'，需要主动拒绝，否则 Promise 永远挂起
@@ -421,6 +434,27 @@ function parseMultipartForm(req) {
     });
 }
 
+function getMultipartFiles(form, fieldNames) {
+    const acceptedNames = new Set(fieldNames);
+
+    if (Array.isArray(form.fileEntries)) {
+        return form.fileEntries
+            .filter(entry => acceptedNames.has(entry.name) && entry.file)
+            .map(entry => entry.file);
+    }
+
+    const collected = [];
+    for (const name of fieldNames) {
+        const value = form.files?.[name];
+        if (Array.isArray(value)) {
+            collected.push(...value);
+        } else if (value) {
+            collected.push(value);
+        }
+    }
+    return collected;
+}
+
 /**
  * Handle POST /v1/images/edits - OpenAI 标准改图接口
  * Accepts multipart/form-data: image (required), prompt (required),
@@ -431,7 +465,8 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
     let slotUuid = null;
 
     try {
-        const { fields, files } = await parseMultipartForm(req);
+        const form = await parseMultipartForm(req);
+        const { fields, files } = form;
 
         const model = fields.model || 'gpt-image-2';
         const prompt = fields.prompt;
@@ -439,10 +474,10 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
         const size = fields.size;
         const n = Math.min(Math.max(1, parseInt(fields.n) || 1), IMAGE_GEN_MAX_N);
 
-        // 兼容 image[] 字段名（LiteLLM 发送的是 image[]，OpenAI 标准是 image）
-        const imageFile = files.image || files['image[]'];
+        // Support both image and image[] field names, preserving repeated file inputs.
+        const imageFiles = getMultipartFiles(form, ['image', 'image[]']);
 
-        logger.info(`[Image Edits] Received request: model=${model}, n=${n}, response_format=${response_format}, hasPrompt=${!!prompt}, hasImage=${!!imageFile}${size ? `, size=${size}` : ''}, fields=${JSON.stringify(Object.keys(fields))}, fileKeys=${JSON.stringify(Object.keys(files))}`);
+        logger.info(`[Image Edits] Received request: model=${model}, n=${n}, response_format=${response_format}, hasPrompt=${!!prompt}, imageCount=${imageFiles.length}${size ? `, size=${size}` : ''}, fields=${JSON.stringify(Object.keys(fields))}, fileKeys=${JSON.stringify(Object.keys(files))}`);
 
         if (!SUPPORTED_IMAGE_MODELS.has(model)) {
             logger.warn(`[Image Edits] Unsupported model: ${model}`);
@@ -458,7 +493,7 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
             return;
         }
 
-        if (!imageFile) {
+        if (imageFiles.length === 0) {
             logger.warn(`[Image Edits] Missing required field: image (received file keys: ${JSON.stringify(Object.keys(files))})`);
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: { message: 'image is required', type: 'invalid_request_error' } }));
@@ -472,8 +507,13 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
             return;
         }
 
-        const {buffer, mimetype} = imageFile;
-        const imageUrl = `data:${mimetype || 'image/png'};base64,${buffer.toString('base64')}`;
+        const imageParts = imageFiles.map(({buffer, mimetype}) => ({
+            type: 'image_url',
+            image_url: {
+                url: `data:${mimetype || 'image/png'};base64,${buffer.toString('base64')}`
+            }
+        }));
+        const totalImageBytes = imageFiles.reduce((total, file) => total + file.buffer.length, 0);
 
         // 构造虚拟 OpenAI 对话请求，参考对话接口实现自动转换
         const virtualOpenAIRequest = {
@@ -482,7 +522,7 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
                 role: 'user',
                 content: [
                     { type: 'text', text: prompt },
-                    { type: 'image_url', image_url: { url: imageUrl } }
+                    ...imageParts
                 ]
             }],
             n,
@@ -526,7 +566,7 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
             });
         }
 
-        logger.info(`[Image Edits] model=${model}, protocol=${finalProviderProtocol}, n=${n}, response_format=${response_format}, imageSize=${Math.round(buffer.length / 1024)}KB${size ? `, size=${size}` : ''}`);
+        logger.info(`[Image Edits] model=${model}, protocol=${finalProviderProtocol}, n=${n}, response_format=${response_format}, imageCount=${imageFiles.length}, totalImageSize=${Math.round(totalImageBytes / 1024)}KB${size ? `, size=${size}` : ''}`);
 
         const imageRequests = Array.from({ length: n }, () =>
             service.generateContent(model, { ...codexRequestBody })

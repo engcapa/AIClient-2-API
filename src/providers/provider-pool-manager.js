@@ -59,6 +59,7 @@ export class ProviderPoolManager {
         'openai-codex-oauth': 'gpt-5-codex-mini',
         'openaiResponses-custom': 'gpt-4o-mini',
         'forward-api': 'gpt-4o-mini',
+        'grok-cli-oauth': 'grok-3-mini',
         'grok-web': 'grok-4.1-mini',
     };
 
@@ -157,6 +158,8 @@ export class ProviderPoolManager {
                     configPath = config.IFLOW_OAUTH_CREDS_FILE_PATH;
                 } else if (providerType.startsWith('openai-codex')) {
                     configPath = config.CODEX_OAUTH_CREDS_FILE_PATH;
+                } else if (providerType.startsWith('grok-cli')) {
+                    configPath = config.GROK_CLI_OAUTH_CREDS_FILE_PATH;
                 }
                 
                 // logger.info(`Checking node ${this._getDisplayName(config)} (${providerType}) expiry date... configPath: ${configPath}`);

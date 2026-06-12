@@ -481,7 +481,7 @@ function getProviderDisplayName(type) {
         const config = currentProviderConfigs.find(c => c.id === type);
         if (config?.name) return config.name;
     }
-    const names = { 'claude-kiro-oauth': 'Claude Kiro', 'gemini-cli-oauth': 'Gemini CLI', 'gemini-antigravity': 'Antigravity', 'openai-codex-oauth': 'Codex', 'grok-web': 'Grok Web' };
+    const names = { 'claude-kiro-oauth': 'Claude Kiro', 'gemini-cli-oauth': 'Gemini CLI', 'gemini-antigravity': 'Antigravity', 'openai-codex-oauth': 'Codex', 'grok-cli-oauth': 'Grok CLI', 'grok-web': 'Grok Web' };
     return names[type] || type;
 }
 
@@ -490,7 +490,7 @@ function getProviderIcon(type) {
         const config = currentProviderConfigs.find(c => c.id === type);
         if (config?.icon) return config.icon.startsWith('fa-') ? `fas ${config.icon}` : config.icon;
     }
-    const icons = { 'claude-kiro-oauth': 'fas fa-robot', 'gemini-cli-oauth': 'fas fa-gem', 'gemini-antigravity': 'fas fa-rocket', 'openai-codex-oauth': 'fas fa-terminal', 'grok-web': 'fas fa-brain' };
+    const icons = { 'claude-kiro-oauth': 'fas fa-robot', 'gemini-cli-oauth': 'fas fa-gem', 'gemini-antigravity': 'fas fa-rocket', 'openai-codex-oauth': 'fas fa-terminal', 'grok-cli-oauth': 'fas fa-terminal', 'grok-web': 'fas fa-brain' };
     return icons[type] || 'fas fa-server';
 }
 

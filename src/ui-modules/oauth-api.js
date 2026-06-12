@@ -8,7 +8,9 @@ import {
     handleKiroOAuth,
     handleIFlowOAuth,
     handleCodexOAuth,
+    handleGrokCliOAuth,
     batchImportCodexTokensStream,
+    batchImportGrokCliTokensStream,
     batchImportKiroRefreshTokensStream,
     importAwsCredentials,
     batchImportGrokTokensStream
@@ -63,6 +65,11 @@ export async function handleGenerateAuthUrl(req, res, currentConfig, providerTyp
         } else if (providerType === 'openai-codex-oauth') {
             // Codex OAuth（OAuth2 + PKCE）
             const result = await handleCodexOAuth(currentConfig, options);
+            authUrl = result.authUrl;
+            authInfo = result.authInfo;
+        } else if (providerType === 'grok-cli-oauth') {
+            // Grok CLI OAuth（xAI OAuth2 + PKCE）
+            const result = await handleGrokCliOAuth(currentConfig, options);
             authUrl = result.authUrl;
             authInfo = result.authInfo;
         } else {
@@ -134,6 +141,16 @@ export async function handleManualOAuthCallback(req, res) {
         if (provider === 'openai-codex-oauth' && code && state) {
             const { handleCodexOAuthCallback } = await import('../auth/oauth-handlers.js');
             const result = await handleCodexOAuthCallback(code, state);
+
+            res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+            return true;
+        }
+
+        // 特殊处理 Grok CLI OAuth 回调
+        if (provider === 'grok-cli-oauth' && code && state) {
+            const { handleGrokCliOAuthCallback } = await import('../auth/oauth-handlers.js');
+            const result = await handleGrokCliOAuthCallback(code, state);
 
             res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
@@ -416,6 +433,76 @@ export async function handleBatchImportCodexTokens(req, res) {
 
     } catch (error) {
         logger.error('[Codex Batch Import] Error:', error);
+        if (res.headersSent) {
+            res.write(`event: error\n`);
+            res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+            res.end();
+        } else {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                success: false,
+                error: error.message
+            }));
+        }
+        return true;
+    }
+}
+
+/**
+ * 批量导入 Grok CLI OAuth Token（带实时进度 SSE）
+ */
+export async function handleBatchImportGrokCliTokens(req, res) {
+    try {
+        const body = await getRequestBody(req);
+        const { tokens, skipDuplicateCheck } = body;
+
+        if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                success: false,
+                error: 'tokens array is required and must not be empty'
+            }));
+            return true;
+        }
+
+        logger.info(`[Grok CLI Batch Import] Starting batch import with ${tokens.length} tokens...`);
+
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        });
+
+        const sendSSE = (event, data) => {
+            res.write(`event: ${event}\n`);
+            res.write(`data: ${JSON.stringify(data)}\n\n`);
+        };
+
+        sendSSE('start', { total: tokens.length });
+
+        const result = await batchImportGrokCliTokensStream(
+            tokens,
+            (progress) => {
+                sendSSE('progress', progress);
+            },
+            !!skipDuplicateCheck
+        );
+
+        logger.info(`[Grok CLI Batch Import] Completed: ${result.success} success, ${result.failed} failed`);
+
+        sendSSE('complete', {
+            success: true,
+            total: result.total,
+            successCount: result.success,
+            failedCount: result.failed,
+            details: result.details
+        });
+
+        res.end();
+        return true;
+    } catch (error) {
+        logger.error('[Grok CLI Batch Import] Error:', error);
         if (res.headersSent) {
             res.write(`event: error\n`);
             res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);

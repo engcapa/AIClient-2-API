@@ -19,6 +19,7 @@ export class UsageService {
             [MODEL_PROVIDER.ANTIGRAVITY]: this.getAntigravityUsage.bind(this),
             [MODEL_PROVIDER.CODEX_API]: this.getCodexUsage.bind(this),
             [MODEL_PROVIDER.GROK_WEB]: this.getGrokUsage.bind(this),
+            [MODEL_PROVIDER.GROK_CLI]: this.getGrokCliUsage.bind(this),
         };
 
         // 映射提供商到对应的格式化函数
@@ -28,6 +29,7 @@ export class UsageService {
             [MODEL_PROVIDER.ANTIGRAVITY]: formatAntigravityUsage,
             [MODEL_PROVIDER.CODEX_API]: formatCodexUsage,
             [MODEL_PROVIDER.GROK_WEB]: formatGrokUsage,
+            [MODEL_PROVIDER.GROK_CLI]: formatGrokCliUsage,
         };
     }
 
@@ -139,7 +141,8 @@ export class UsageService {
             'geminiApiService', 
             'antigravityApiService', 
             'codexApiService',
-            'grokApiService'
+            'grokApiService',
+            'grokCliApiService'
         ];
 
         for (const serviceName of apiServiceNames) {
@@ -184,6 +187,13 @@ export class UsageService {
      */
     async getGrokUsage(uuid = null) {
         return this._getRawUsageFromAdapter(MODEL_PROVIDER.GROK_WEB, uuid);
+    }
+
+    /**
+     * 获取 Grok CLI 提供商的用量信息
+     */
+    async getGrokCliUsage(uuid = null) {
+        return this._getRawUsageFromAdapter(MODEL_PROVIDER.GROK_CLI, uuid);
     }
 
     /**
@@ -600,6 +610,43 @@ export function formatGrokUsage(usageData) {
         },
         user: { label: null },
         items,
+        raw: usageData
+    };
+}
+
+/**
+ * 格式化 Grok CLI 用量。
+ * xAI Grok CLI OAuth 当前没有稳定的额度查询接口，这里展示账号与凭据状态。
+ */
+export function formatGrokCliUsage(usageData) {
+    if (!usageData) return null;
+
+    return {
+        summary: {
+            usedPercent: 0,
+            status: 'normal',
+            resetAt: usageData.expiresAt || null,
+            plan: 'XAI',
+            planClass: getPlanClass('XAI'),
+            unit: 'status',
+            totalUsed: 0,
+            totalLimit: 0
+        },
+        user: {
+            email: usageData.account || null
+        },
+        items: [
+            {
+                id: 'credential',
+                label: 'OAuth Credential',
+                used: 0,
+                limit: 1,
+                percent: 0,
+                unit: 'status',
+                status: 'normal',
+                resetAt: usageData.expiresAt || null
+            }
+        ],
         raw: usageData
     };
 }

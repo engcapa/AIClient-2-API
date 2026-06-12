@@ -623,7 +623,7 @@ class CodexAuth {
      * @param {string} refreshToken 
      * @returns {Promise<{isDuplicate: boolean, existingPath?: string}>}
      */
-    async checkDuplicate(accountId, refreshToken) {
+    async checkDuplicate(accountId, refreshToken, email = null) {
         const projectDir = process.cwd();
         const targetDir = path.join(projectDir, 'configs', 'codex');
 
@@ -640,7 +640,18 @@ class CodexAuth {
                         const content = await fs.promises.readFile(fullPath, 'utf8');
                         const credentials = JSON.parse(content);
 
-                        if ((accountId && credentials.account_id === accountId) || (refreshToken && credentials.refresh_token === refreshToken)) {
+                        if (refreshToken && credentials.refresh_token === refreshToken) {
+                            const relativePath = path.relative(process.cwd(), fullPath);
+                            return {
+                                isDuplicate: true,
+                                existingPath: relativePath
+                            };
+                        }
+
+                        if (accountId && credentials.account_id === accountId) {
+                            if (email && credentials.email && credentials.email.toLowerCase() !== email.toLowerCase()) {
+                                continue;
+                            }
                             const relativePath = path.relative(process.cwd(), fullPath);
                             return {
                                 isDuplicate: true,
@@ -723,7 +734,7 @@ export async function batchImportCodexTokensStream(tokens, onProgress = null, sk
 
             // 检查重复
             if (!skipDuplicateCheck) {
-                const duplicateCheck = await auth.checkDuplicate(accountId, refreshToken);
+                const duplicateCheck = await auth.checkDuplicate(accountId, refreshToken, email);
                 if (duplicateCheck.isDuplicate) {
                     progressData.current = {
                         index: i + 1,
@@ -802,12 +813,6 @@ export async function batchImportCodexTokensStream(tokens, onProgress = null, sk
             };
             results.success++;
 
-            // 自动关联到 Pools
-            await autoLinkProviderConfigs(CONFIG, {
-                onlyCurrentCred: true,
-                credPath: relativePath
-            });
-
         } catch (error) {
             logger.error(`${CODEX_OAUTH_CONFIG.logPrefix} Token ${i + 1} import failed:`, error.message);
 
@@ -833,6 +838,12 @@ export async function batchImportCodexTokensStream(tokens, onProgress = null, sk
     }
 
     if (results.success > 0) {
+        try {
+            await autoLinkProviderConfigs(CONFIG);
+        } catch (linkError) {
+            logger.error(`${CODEX_OAUTH_CONFIG.logPrefix} Failed to auto-link imported tokens:`, linkError.message);
+        }
+
         broadcastEvent('oauth_batch_success', {
             provider: 'openai-codex-oauth',
             count: results.success,
