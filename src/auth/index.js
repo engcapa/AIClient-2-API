@@ -39,3 +39,11 @@ export {
     batchImportGrokTokensStream
 } from './grok-auth.js';
 
+// Grok CLI OAuth
+export {
+    refreshGrokCliTokensWithRetry,
+    handleGrokCliOAuth,
+    handleGrokCliOAuthCallback,
+    batchImportGrokCliTokensStream
+} from './grok-cli-oauth.js';
+

@@ -233,6 +233,17 @@ function getAvailableRoutes() {
             badgeClass: 'oauth'
         },
         {
+            provider: 'grok-cli-oauth',
+            name: t('dashboard.routing.nodeName.grokCli'),
+            paths: {
+                openai: '/grok-cli-oauth/v1/responses',
+                claude: '/grok-cli-oauth/v1/messages'
+            },
+            description: t('dashboard.routing.oauth'),
+            badge: t('dashboard.routing.oauth'),
+            badgeClass: 'oauth'
+        },
+        {
             provider: 'openaiResponses-custom',
             name: t('dashboard.routing.nodeName.responses'),
             paths: {
@@ -396,6 +407,7 @@ async function copyCurlExample(provider, options = {}) {
             break;
             
         case 'openaiResponses-custom':
+        case 'grok-cli-oauth':
             if (protocol === 'openai') {
                 curlCommand = `curl ${hostname}${path} \\
   -H "Content-Type: application/json" \\
@@ -492,6 +504,7 @@ function renderRoutingExamples(providerConfigs) {
         'openaiResponses-custom': 'fa-comment-alt',
         'openai-iflow': 'fa-wind',
         'openai-codex-oauth': 'fa-keyboard',
+        'grok-cli-oauth': 'fa-terminal',
         'grok-web': 'fa-search'
     };
 
@@ -506,6 +519,7 @@ function renderRoutingExamples(providerConfigs) {
         'openai-qwen-oauth': 'qwen3-coder-plus',
         'openai-iflow': 'qwen3-max',
         'openai-codex-oauth': 'gpt-5',
+        'grok-cli-oauth': 'grok-3-mini',
         'grok-web': 'grok-4.1-mini',
         'openaiResponses-custom': 'gpt-4o'
     };
@@ -565,6 +579,13 @@ function renderRoutingExamples(providerConfigs) {
         const hostname = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 
                          `http://${window.location.host}` : 
                          `${window.location.protocol}//${window.location.host}`;
+        const openaiRequestExample = routeInfo.paths.openai.includes('/v1/responses')
+            ? `    "model": "${defaultModel}",
+    "input": "Hello!",
+    "max_output_tokens": 1000`
+            : `    "model": "${defaultModel}",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 1000`;
 
         const card = document.createElement('div');
         card.className = 'routing-example-card';
@@ -593,9 +614,7 @@ function renderRoutingExamples(providerConfigs) {
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -d '{
-    "model": "${defaultModel}",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "max_tokens": 1000
+${openaiRequestExample}
   }'</code></pre>
                     </div>
                 </div>

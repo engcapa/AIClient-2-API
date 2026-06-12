@@ -23,7 +23,9 @@ import {
     generateOutputTextDone,
     generateContentPartDone,
     generateOutputItemDone,
-    generateResponseCompleted
+    generateOutputTextDelta,
+    generateResponseCompleted,
+    streamStateManager
 } from '../../providers/openai/openai-responses-core.mjs';
 
 /**
@@ -162,6 +164,7 @@ function normalizeToolName(name) {
 export class GeminiConverter extends BaseConverter {
     constructor() {
         super('gemini');
+        this.openAIResponsesStreamStates = new Map();
     }
 
     /**
@@ -205,14 +208,14 @@ export class GeminiConverter extends BaseConverter {
     /**
      * 转换流式响应块
      */
-    convertStreamChunk(chunk, targetProtocol, model) {
+    convertStreamChunk(chunk, targetProtocol, model, requestId) {
         switch (targetProtocol) {
             case MODEL_PROTOCOL_PREFIX.OPENAI:
                 return this.toOpenAIStreamChunk(chunk, model);
             case MODEL_PROTOCOL_PREFIX.CLAUDE:
                 return this.toClaudeStreamChunk(chunk, model);
             case MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES:
-                return this.toOpenAIResponsesStreamChunk(chunk, model);
+                return this.toOpenAIResponsesStreamChunk(chunk, model, requestId);
             case MODEL_PROTOCOL_PREFIX.CODEX:
                 return this.toCodexStreamChunk(chunk, model);
             default:
@@ -963,7 +966,8 @@ export class GeminiConverter extends BaseConverter {
                 }
                 content.push({
                     type: 'tool_result',
-                    tool_use_id: part.functionResponse.name,
+                    // 优先使用 id（即原始 tool_use_id），回退到 name
+                    tool_use_id: part.functionResponse.id || part.functionResponse.name,
                     content: typeof responseContent === 'string' ? responseContent : JSON.stringify(responseContent)
                 });
             }
@@ -1171,30 +1175,201 @@ export class GeminiConverter extends BaseConverter {
     /**
      * Gemini响应 -> OpenAI Responses响应
      */
+    _buildResponsesMessageItemId(responseId, index = 0) {
+        return responseId ? `msg_${responseId}_${index}` : `msg_${uuidv4().replace(/-/g, '')}`;
+    }
+
+    _buildResponsesFunctionItemId(callId) {
+        return callId ? `fc_${callId}` : `fc_${uuidv4().replace(/-/g, '')}`;
+    }
+
+    _stringifyGeminiFunctionArgs(args) {
+        return typeof args === 'string' ? args : JSON.stringify(args || {});
+    }
+
+    _getOpenAIResponsesStreamState(model, requestId) {
+        const stateKey = requestId || 'default';
+        if (!this.openAIResponsesStreamStates.has(stateKey)) {
+            const responseId = `resp_${uuidv4().replace(/-/g, '')}`;
+            this.openAIResponsesStreamStates.set(stateKey, {
+                responseId,
+                msgId: this._buildResponsesMessageItemId(responseId, 0),
+                model: model || 'unknown',
+                createdAt: Math.floor(Date.now() / 1000),
+                started: false,
+                textStarted: false,
+                toolCalls: new Map()
+            });
+        }
+
+        const state = this.openAIResponsesStreamStates.get(stateKey);
+        if (model) {
+            state.model = model;
+        }
+
+        const coreState = streamStateManager.getOrCreateState(stateKey);
+        coreState.id = state.responseId;
+        coreState.msgId = state.msgId;
+        coreState.model = state.model;
+        coreState.startTime = state.createdAt;
+        if (!state.started) {
+            coreState.fullText = '';
+            coreState.toolCalls = [];
+            coreState.currentToolCall = null;
+            coreState.status = 'in_progress';
+        }
+
+        return { stateKey, state };
+    }
+
+    _ensureOpenAIResponsesStreamStarted(stateKey, state, events) {
+        if (state.started) {
+            return;
+        }
+        events.push(
+            generateResponseCreated(stateKey, state.model),
+            generateResponseInProgress(stateKey)
+        );
+        state.started = true;
+    }
+
+    _ensureOpenAIResponsesTextStarted(stateKey, state, events) {
+        this._ensureOpenAIResponsesStreamStarted(stateKey, state, events);
+        if (state.textStarted) {
+            return;
+        }
+        events.push(
+            generateOutputItemAdded(stateKey),
+            generateContentPartAdded(stateKey)
+        );
+        state.textStarted = true;
+    }
+
+    _getGeminiResponsesToolState(state, part, index) {
+        const callId = part.functionCall.id || `call_${state.responseId}_${index}`;
+        const key = String(index);
+        if (!state.toolCalls.has(key)) {
+            state.toolCalls.set(key, {
+                outputIndex: index,
+                callId,
+                itemId: this._buildResponsesFunctionItemId(callId),
+                name: part.functionCall.name || '',
+                arguments: this._stringifyGeminiFunctionArgs(part.functionCall.args),
+                added: false,
+                done: false
+            });
+        }
+        const toolState = state.toolCalls.get(key);
+        if (part.functionCall.id && toolState.callId !== part.functionCall.id) {
+            toolState.callId = part.functionCall.id;
+            toolState.itemId = this._buildResponsesFunctionItemId(part.functionCall.id);
+        }
+        if (part.functionCall.name) {
+            toolState.name = part.functionCall.name;
+        }
+        toolState.arguments = this._stringifyGeminiFunctionArgs(part.functionCall.args);
+        return toolState;
+    }
+
+    _emitGeminiResponsesTool(stateKey, state, toolState, events) {
+        this._ensureOpenAIResponsesStreamStarted(stateKey, state, events);
+        if (!toolState.added) {
+            events.push({
+                item: {
+                    id: toolState.itemId,
+                    call_id: toolState.callId,
+                    type: "function_call",
+                    name: toolState.name,
+                    arguments: "",
+                    status: "in_progress"
+                },
+                output_index: toolState.outputIndex,
+                sequence_number: 2,
+                type: "response.output_item.added"
+            });
+            toolState.added = true;
+        }
+        if (!toolState.done) {
+            if (toolState.arguments) {
+                events.push({
+                    delta: toolState.arguments,
+                    item_id: toolState.itemId,
+                    output_index: toolState.outputIndex,
+                    sequence_number: 3,
+                    type: "response.function_call_arguments.delta"
+                });
+            }
+            events.push({
+                type: "response.function_call_arguments.done",
+                item_id: toolState.itemId,
+                output_index: toolState.outputIndex,
+                arguments: toolState.arguments
+            });
+            events.push({
+                type: "response.output_item.done",
+                output_index: toolState.outputIndex,
+                item: {
+                    id: toolState.itemId,
+                    call_id: toolState.callId,
+                    type: "function_call",
+                    name: toolState.name,
+                    arguments: toolState.arguments,
+                    status: "completed"
+                }
+            });
+            toolState.done = true;
+        }
+    }
+
     toOpenAIResponsesResponse(geminiResponse, model) {
         const content = this.processGeminiResponseContent(geminiResponse);
         const textContent = typeof content === 'string' ? content : JSON.stringify(content);
 
         let output = [];
-        output.push({
-            id: `msg_${uuidv4().replace(/-/g, '')}`,
-            summary: [],
-            type: "message",
-            role: "assistant",
-            status: "completed",
-            content: [{
-                annotations: [],
-                logprobs: [],
-                text: textContent,
-                type: "output_text"
-            }]
-        });
+        const responseId = `resp_${uuidv4().replace(/-/g, '')}`;
+        const toolCalls = [];
+
+        if (geminiResponse?.candidates) {
+            for (const candidate of geminiResponse.candidates) {
+                const parts = candidate.content?.parts || [];
+                for (const part of parts) {
+                    if (part.functionCall) {
+                        const callId = part.functionCall.id || `call_${uuidv4().replace(/-/g, '').slice(0, 24)}`;
+                        toolCalls.push({
+                            id: this._buildResponsesFunctionItemId(callId),
+                            call_id: callId,
+                            type: "function_call",
+                            name: part.functionCall.name,
+                            arguments: this._stringifyGeminiFunctionArgs(part.functionCall.args),
+                            status: "completed"
+                        });
+                    }
+                }
+            }
+        }
+
+        if (textContent || toolCalls.length === 0) {
+            output.push({
+                id: this._buildResponsesMessageItemId(responseId, 0),
+                summary: [],
+                type: "message",
+                role: "assistant",
+                status: "completed",
+                content: [{
+                    annotations: [],
+                    logprobs: [],
+                    text: textContent,
+                    type: "output_text"
+                }]
+            });
+        }
+        output.push(...toolCalls);
 
         return {
             background: false,
             created_at: Math.floor(Date.now() / 1000),
             error: null,
-            id: `resp_${uuidv4().replace(/-/g, '')}`,
+            id: responseId,
             incomplete_details: null,
             max_output_tokens: null,
             max_tool_calls: null,
@@ -1240,7 +1415,7 @@ export class GeminiConverter extends BaseConverter {
     toOpenAIResponsesStreamChunk(geminiChunk, model, requestId = null) {
         if (!geminiChunk) return [];
 
-        const responseId = requestId || `resp_${uuidv4().replace(/-/g, '')}`;
+        const { stateKey, state } = this._getOpenAIResponsesStreamState(model, requestId);
         const events = [];
 
         // 处理完整的Gemini chunk对象
@@ -1255,12 +1430,7 @@ export class GeminiConverter extends BaseConverter {
                     // 只在第一次有内容时发送开始事件
                     const hasContent = parts.some(part => part && typeof part.text === 'string' && part.text.length > 0);
                     if (hasContent) {
-                        events.push(
-                            generateResponseCreated(responseId, model || 'unknown'),
-                            generateResponseInProgress(responseId),
-                            generateOutputItemAdded(responseId),
-                            generateContentPartAdded(responseId)
-                        );
+                        this._ensureOpenAIResponsesTextStarted(stateKey, state, events);
                     }
                 }
                 
@@ -1269,24 +1439,48 @@ export class GeminiConverter extends BaseConverter {
                     const textParts = parts.filter(part => part && typeof part.text === 'string');
                     if (textParts.length > 0) {
                         const text = textParts.map(part => part.text).join('');
-                        events.push({
-                            delta: text,
-                            item_id: `msg_${uuidv4().replace(/-/g, '')}`,
-                            output_index: 0,
-                            sequence_number: 3,
-                            type: "response.output_text.delta"
-                        });
+                        this._ensureOpenAIResponsesTextStarted(stateKey, state, events);
+                        events.push(generateOutputTextDelta(stateKey, text));
+                    }
+
+                    const functionParts = parts.filter(part => part && part.functionCall);
+                    functionParts.forEach((part, index) => {
+                        const toolState = this._getGeminiResponsesToolState(state, part, index);
+                        this._emitGeminiResponsesTool(stateKey, state, toolState, events);
+                    });
+                    if (functionParts.length > 0) {
+                        const coreState = streamStateManager.getOrCreateState(stateKey);
+                        coreState.toolCalls = Array.from(state.toolCalls.values()).map(toolState => ({
+                            id: toolState.itemId,
+                            call_id: toolState.callId,
+                            name: toolState.name,
+                            arguments: toolState.arguments || '{}'
+                        }));
                     }
                 }
                 
                 // 处理finishReason
                 if (candidate.finishReason) {
-                    events.push(
-                        generateOutputTextDone(responseId),
-                        generateContentPartDone(responseId),
-                        generateOutputItemDone(responseId),
-                        generateResponseCompleted(responseId)
-                    );
+                    this._ensureOpenAIResponsesStreamStarted(stateKey, state, events);
+                    if (state.textStarted) {
+                        events.push(
+                            generateOutputTextDone(stateKey),
+                            generateContentPartDone(stateKey),
+                            generateOutputItemDone(stateKey)
+                        );
+                    }
+                    const completedEvent = generateResponseCompleted(stateKey, {
+                        input_tokens: geminiChunk.usageMetadata?.promptTokenCount || 0,
+                        input_tokens_details: {
+                            cached_tokens: geminiChunk.usageMetadata?.cachedContentTokenCount || 0
+                        },
+                        output_tokens: geminiChunk.usageMetadata?.candidatesTokenCount || 0,
+                        output_tokens_details: {
+                            reasoning_tokens: geminiChunk.usageMetadata?.thoughtsTokenCount || 0
+                        },
+                        total_tokens: geminiChunk.usageMetadata?.totalTokenCount || 0
+                    });
+                    events.push(completedEvent);
                     
                     // 如果有 usage 信息，更新最后一个事件
                     if (geminiChunk.usageMetadata && events.length > 0) {
@@ -1305,19 +1499,17 @@ export class GeminiConverter extends BaseConverter {
                             };
                         }
                     }
+
+                    streamStateManager.cleanup(stateKey);
+                    this.openAIResponsesStreamStates.delete(stateKey);
                 }
             }
         }
 
         // 向后兼容：处理字符串格式
         if (typeof geminiChunk === 'string') {
-            events.push({
-                delta: geminiChunk,
-                item_id: `msg_${uuidv4().replace(/-/g, '')}`,
-                output_index: 0,
-                sequence_number: 3,
-                type: "response.output_text.delta"
-            });
+            this._ensureOpenAIResponsesTextStarted(stateKey, state, events);
+            events.push(generateOutputTextDelta(stateKey, geminiChunk));
         }
 
         return events;

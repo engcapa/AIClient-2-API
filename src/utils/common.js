@@ -75,6 +75,132 @@ function getErrorStatusCode(error) {
     return error?.response?.status || error?.status || error?.statusCode || error?.code || null;
 }
 
+function getHttpStatusLabel(status) {
+    switch (status) {
+        case 400: return 'Bad Request';
+        case 401: return 'Unauthorized';
+        case 402: return 'Payment Required';
+        case 403: return 'Forbidden';
+        case 404: return 'Not Found';
+        case 408: return 'Request Timeout';
+        case 409: return 'Conflict';
+        case 422: return 'Unprocessable Entity';
+        case 429: return 'Too Many Requests';
+        case 500: return 'Internal Server Error';
+        case 502: return 'Bad Gateway';
+        case 503: return 'Service Unavailable';
+        case 504: return 'Gateway Timeout';
+        default: return 'HTTP Error';
+    }
+}
+
+function extractReadableErrorText(data) {
+    if (data === undefined || data === null) return '';
+    if (typeof data === 'string') return data;
+    if (Buffer.isBuffer(data)) return data.toString('utf8');
+
+    if (Array.isArray(data)) {
+        return data
+            .map(item => extractReadableErrorText(item))
+            .filter(Boolean)
+            .join(' | ');
+    }
+
+    if (typeof data !== 'object') {
+        return String(data);
+    }
+
+    const directFields = [
+        data.message,
+        data.error_description,
+        data.description,
+        data.detail,
+        data.reason,
+        data.msg
+    ].filter(value => typeof value === 'string' && value.trim());
+
+    if (directFields.length > 0) {
+        return directFields.join(' | ');
+    }
+
+    if (typeof data.error === 'string' && data.error.trim()) {
+        return data.error;
+    }
+
+    if (data.error && typeof data.error === 'object') {
+        const nestedError = extractReadableErrorText(data.error);
+        if (nestedError) return nestedError;
+    }
+
+    if (Array.isArray(data.details)) {
+        const detailText = data.details
+            .map(detail => extractReadableErrorText(detail))
+            .filter(Boolean)
+            .join(' | ');
+        if (detailText) return detailText;
+    }
+
+    if (data.metadata && typeof data.metadata === 'object') {
+        const metadataText = extractReadableErrorText(data.metadata);
+        if (metadataText) return metadataText;
+    }
+
+    try {
+        return JSON.stringify(data);
+    } catch {
+        return String(data);
+    }
+}
+
+export async function getNormalizedErrorResponseText(error) {
+    const data = error?.response?.data;
+    const fallbackText = extractReadableErrorText(data) || error?.message || '';
+
+    if (!data || typeof data?.on !== 'function' || typeof data?.read !== 'function') {
+        return fallbackText;
+    }
+
+    const chunks = [];
+    try {
+        for await (const chunk of data) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+        }
+
+        const bodyText = Buffer.concat(chunks).toString('utf8');
+        if (!bodyText) return fallbackText;
+
+        try {
+            const parsed = JSON.parse(bodyText);
+            return extractReadableErrorText(parsed) || bodyText;
+        } catch {
+            return bodyText;
+        }
+    } catch (readError) {
+        logger.warn(`[Error Normalize] Failed to read error response stream: ${readError.message}`);
+        return fallbackText;
+    }
+}
+
+export function buildHttpErrorReason(status, context, responseText = '', options = {}) {
+    const statusLabel = getHttpStatusLabel(status);
+    const responseSnippet = responseText ? responseText.substring(0, 500) : '';
+    const suffix = options.suffix ? ` - ${options.suffix}` : '';
+    const prefix = status ? `${status} ${statusLabel}` : statusLabel;
+    return `${prefix}${context ? ` (${context})` : ''}${suffix}${responseSnippet ? `: ${responseSnippet}` : ''}`;
+}
+
+export async function normalizeProviderErrorMessage(error, options = {}) {
+    const status = options.status ?? getErrorStatusCode(error);
+    const responseText = await getNormalizedErrorResponseText(error);
+    const reason = buildHttpErrorReason(status, options.context || '', responseText, {
+        suffix: options.suffix || ''
+    });
+    // Normalize in place so existing throw/logging paths that keep using `error`
+    // automatically see the readable message without forcing every caller to reassign.
+    error.message = reason;
+    return { responseText, reason, status };
+}
+
 function getHeaderValue(headers, headerName) {
     if (!headers) return null;
 
@@ -389,11 +515,15 @@ function appendCustomModelsToModelList(clientModelList, customEntries, providerT
 export function getProtocolPrefix(provider) {
     // Special case for Codex - it needs its own protocol
     if (provider === 'openai-codex-oauth') {
-        return 'codex';
+        return MODEL_PROTOCOL_PREFIX.CODEX;
+    }
+    // Grok CLI OAuth talks to xAI Responses API directly.
+    if (provider === 'grok-cli-oauth' || provider.startsWith('grok-cli-oauth-')) {
+        return MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES;
     }
     // Special case for AtlasCloud - it uses openai protocol
     if (provider === 'atlascloud' || provider.startsWith('atlascloud-')) {
-        return 'openai';
+        return MODEL_PROTOCOL_PREFIX.OPENAI;
     }
 
     const hyphenIndex = provider.indexOf('-');
@@ -554,7 +684,8 @@ export function getRequestBody(req, options = {}) {
         const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : DEFAULT_MAX_BYTES;
 
         // 1. Quick check Content-Length header
-        const contentLength = parseInt(req.headers['content-length'] || '0', 10);
+        const headers = req.headers || {};
+        const contentLength = parseInt(headers['content-length'] || '0', 10);
         if (!isNaN(contentLength) && contentLength > maxBytes) {
             req.resume(); // drain & discard
             const error = new Error(`Request body too large. Maximum size is ${maxBytes} bytes.`);
@@ -572,13 +703,23 @@ export function getRequestBody(req, options = {}) {
             reject(error);
         };
 
+        const rejectTooLarge = (error) => {
+            if (settled) return;
+            settled = true;
+            if (typeof req.resume === 'function') {
+                req.resume();
+            }
+            reject(error);
+        };
+
         req.on('data', chunk => {
             if (settled) return;
             receivedBytes += chunk.length;
             if (maxBytes && receivedBytes > maxBytes) {
                 const error = new Error(`Request body too large. Maximum size is ${maxBytes} bytes.`);
                 error.statusCode = 413;
-                fail(error);
+                error.code = 'BODY_TOO_LARGE';
+                rejectTooLarge(error);
                 return;
             }
             body += chunk.toString();
@@ -737,6 +878,12 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         const needsConversion = getProtocolPrefix(fromProvider) !== getProtocolPrefix(toProvider);
         requestBody.model = model;
         const nativeStream = await service.generateContentStream(model, requestBody);
+        
+        // 如果提供者内部发生了模型回退（如 Antigravity 自动降级），同步更新本地 model 变量
+        // 这确保了后续的监控钩子和统计插件记录的是实际使用的模型
+        if (requestBody.model && requestBody.model !== model) {
+            model = requestBody.model;
+        }
         const addEvent = getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.CLAUDE || getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES;
         // 为每个请求生成唯一 ID，用于在单例 converter 中隔离并发流状态
         const streamRequestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -1069,6 +1216,13 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         requestBody.model = model;
         // fs.writeFile('oldRequest'+Date.now()+'.json', JSON.stringify(requestBody));
         const nativeResponse = await service.generateContent(model, requestBody);
+        
+        // 如果提供者内部发生了模型回退（如 Antigravity 自动降级），同步更新本地 model 变量
+        // 这确保了后续的监控钩子和统计插件记录的是实际使用的模型
+        if (requestBody.model && requestBody.model !== model) {
+            model = requestBody.model;
+        }
+        
         const responseText = extractResponseText(nativeResponse, toProvider);
 
         // Convert the response back to the client's format (fromProvider), if necessary.
@@ -1512,6 +1666,11 @@ export async function handleContentGenerationRequest(req, res, service, endpoint
         await handleUnaryRequest(res, service, model, processedRequestBody, fromProvider, toProvider, CONFIG.PROMPT_LOG_MODE, PROMPT_LOG_FILENAME, providerPoolManager, actualUuid, actualCustomName, retryContext);
     }
 
+    // 同步更新模型名称（如果处理器内部或提供者发生了回退）
+    if (processedRequestBody.model && processedRequestBody.model !== model) {
+        model = processedRequestBody.model;
+    }
+
     // 执行插件钩子：内容生成后
     try {
         const pluginManager = getPluginManager();
@@ -1918,6 +2077,33 @@ export function extractSystemPromptFromRequestBody(requestBody, provider) {
                 }
             }
             break;
+        case MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES: {
+            if (typeof requestBody.instructions === 'string') {
+                incomingSystemText = requestBody.instructions;
+            } else if (requestBody.instructions) {
+                incomingSystemText = JSON.stringify(requestBody.instructions);
+            } else if (Array.isArray(requestBody.input)) {
+                const responsesSystemItem = requestBody.input.find(item =>
+                    item?.role === 'system' ||
+                    item?.role === 'developer' ||
+                    item?.type === 'system' ||
+                    item?.type === 'developer' ||
+                    (item?.type === 'message' && (item?.role === 'system' || item?.role === 'developer'))
+                );
+
+                const content = responsesSystemItem?.content;
+                if (typeof content === 'string') {
+                    incomingSystemText = content;
+                } else if (Array.isArray(content)) {
+                    incomingSystemText = content
+                        .map(part => typeof part === 'string' ? part : (part?.text || part?.content || JSON.stringify(part)))
+                        .join('\n');
+                } else if (content) {
+                    incomingSystemText = JSON.stringify(content);
+                }
+            }
+            break;
+        }
         default:
             logger.warn(`[System Prompt] Unknown provider: ${provider}`);
             break;

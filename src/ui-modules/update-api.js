@@ -5,6 +5,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
+import axios from 'axios';
 import { CONFIG } from '../core/config-manager.js';
 import { parseProxyUrl } from '../utils/proxy-utils.js';
 import { getRequestBody } from '../utils/common.js';
@@ -91,39 +92,51 @@ function getUpdateProxyConfig() {
  */
 async function fetchWithProxy(url, options = {}) {
     const proxyConfig = getUpdateProxyConfig();
-    
-    if (proxyConfig) {
-        // 使用 undici 的 fetch 支持代理
-        const fetchOptions = {
-            ...options,
-            dispatcher: undefined
+
+    const method = options.method || 'GET';
+    const headers = options.headers || {};
+    const timeout = options.timeout || 0;
+    const responseType = options.responseType || 'arraybuffer';
+    const maxRedirects = options.redirect === 'manual' ? 0 : 5;
+
+    try {
+        const axiosOptions = {
+            method,
+            url,
+            headers,
+            data: options.body,
+            timeout,
+            responseType,
+            maxRedirects,
+            validateStatus: () => true
         };
-        
-        // 根据 URL 协议选择合适的 agent
-        const urlObj = new URL(url);
-        if (urlObj.protocol === 'https:') {
-            fetchOptions.agent = proxyConfig.httpsAgent;
-        } else {
-            fetchOptions.agent = proxyConfig.httpAgent;
+
+        if (proxyConfig) {
+            const urlObj = new URL(url);
+            axiosOptions.httpAgent = urlObj.protocol === 'https:' ? proxyConfig.httpsAgent : proxyConfig.httpAgent;
+            axiosOptions.httpsAgent = proxyConfig.httpsAgent;
+            axiosOptions.proxy = false;
         }
-        
-        // Node.js 原生 fetch 不直接支持 agent，需要使用 undici 或 node-fetch
-        // 这里使用动态导入 undici 来支持代理
-        try {
-            const { fetch: undiciFetch, ProxyAgent } = await import('undici');
-            const proxyAgent = new ProxyAgent(CONFIG.PROXY_URL);
-            return await undiciFetch(url, {
-                ...options,
-                dispatcher: proxyAgent
-            });
-        } catch (importError) {
-            // 如果 undici 不可用，回退到原生 fetch（不使用代理）
-            logger.warn('[Update] undici not available, falling back to native fetch without proxy');
-            return await fetch(url, options);
-        }
+
+        const response = await axios.request(axiosOptions);
+        const payloadBuffer = Buffer.isBuffer(response.data)
+            ? response.data
+            : Buffer.from(response.data || '');
+
+        return {
+            ok: response.status >= 200 && response.status < 300,
+            status: response.status,
+            statusText: response.statusText,
+            async json() {
+                return JSON.parse(payloadBuffer.toString('utf8'));
+            },
+            async arrayBuffer() {
+                return payloadBuffer;
+            }
+        };
+    } catch (error) {
+        throw error;
     }
-    
-    return await fetch(url, options);
 }
 
 /**

@@ -42,6 +42,12 @@ function getBaseProviderConfigs() {
             icon: 'fa-code',
             defaultPath: 'configs/codex/'
         },
+        {
+            id: 'grok-cli-oauth',
+            name: t('dashboard.routing.nodeName.grokCli'),
+            icon: 'fa-terminal',
+            defaultPath: 'configs/grok-cli/'
+        },
         { 
             id: 'openai-qwen-oauth', 
             name: t('dashboard.routing.nodeName.qwen'), 
@@ -220,8 +226,10 @@ function getFieldLabel(key) {
         'ANTIGRAVITY_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'IFLOW_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'CODEX_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
+        'GROK_CLI_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'GROK_COOKIE_TOKEN': t('modal.provider.field.ssoToken'),
         'GROK_CF_CLEARANCE': t('modal.provider.field.cfClearance'),
+        'GROK_CF_BM': t('modal.provider.field.cfBm'),
 
         'GROK_USER_AGENT': t('modal.provider.field.userAgent'),
         'GEMINI_BASE_URL': 'Gemini Base URL',
@@ -449,6 +457,26 @@ function getProviderTypeFields(providerType) {
                 placeholder: 'https://api.openai.com/v1/codex'
             }
         ],
+        'grok-cli-oauth': [
+            {
+                id: 'GROK_CLI_OAUTH_CREDS_FILE_PATH',
+                label: t('modal.provider.field.oauthPath'),
+                type: 'text',
+                placeholder: 'configs/grok-cli/..._xai-..._oauth_creds.json'
+            },
+            {
+                id: 'GROK_CLI_EMAIL',
+                label: `${t('modal.provider.field.email')} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'email',
+                placeholder: t('modal.provider.field.email.placeholder')
+            },
+            {
+                id: 'GROK_CLI_BASE_URL',
+                label: `xAI Base URL <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: 'https://api.x.ai/v1'
+            }
+        ],
         'grok-web': [
             {
                 id: 'GROK_COOKIE_TOKEN',
@@ -457,10 +485,22 @@ function getProviderTypeFields(providerType) {
                 placeholder: 'sso cookie token'
             },
             {
+                id: 'GROK_BASE_URL',
+                label: `${t('modal.provider.field.grokBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: 'https://grok.com'
+            },
+            {
                 id: 'GROK_CF_CLEARANCE',
                 label: `${t('modal.provider.field.cfClearance')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'cf_clearance cookie value'
+            },
+            {
+                id: 'GROK_CF_BM',
+                label: `${t('modal.provider.field.cfBm')} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: '__cf_bm cookie value'
             },
             {
                 id: 'GROK_USER_AGENT',
@@ -469,10 +509,10 @@ function getProviderTypeFields(providerType) {
                 placeholder: 'Mozilla/5.0 ...'
             },
             {
-                id: 'GROK_BASE_URL',
-                label: `${t('modal.provider.field.grokBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
+                id: 'GROK_STATSIG_ID',
+                label: `${t('modal.provider.field.statsigId')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
-                placeholder: 'https://grok.com'
+                placeholder: 'x-statsig-id header value'
             }
         ],
         'forward-api': [

@@ -17,7 +17,7 @@ import {
     getContentText as getContentTextUtil
 } from '../../utils/token-utils.js';
 import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
-import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog } from '../../utils/common.js';
+import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getNormalizedErrorResponseText, buildHttpErrorReason, normalizeProviderErrorMessage } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 
 const KIRO_THINKING = {
@@ -1773,6 +1773,11 @@ async saveCredentialsToFile(filePath, newData) {
             // Handle 401 (Unauthorized) - refresh UUID first, then try to refresh token
             if (status === 401 && !isRetry) {
                 logger.info('[Kiro] Received 401. Refreshing UUID and triggering background refresh via PoolManager...');
+                await normalizeProviderErrorMessage(error, {
+                    status: 401,
+                    context: 'callApi',
+                    suffix: 'triggering auto-refresh'
+                });
                 
                 // 1. 先刷新 UUID
                 const newUuid = this._refreshUuid();
@@ -1807,6 +1812,7 @@ async saveCredentialsToFile(filePath, newData) {
             // Handle 429 (Too Many Requests) - wait baseDelay then switch credential
             if (status === 429) {
                 logger.info(`[Kiro] Received 429 (Too Many Requests). Waiting ${baseDelay}ms before switching credential...`);
+                await normalizeProviderErrorMessage(error, { status: 429, context: 'callApi' });
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
@@ -1817,6 +1823,7 @@ async saveCredentialsToFile(filePath, newData) {
             // Handle 5xx server errors - wait baseDelay then switch credential
             if (status >= 500 && status < 600) {
                 logger.info(`[Kiro] Received ${status} server error. Waiting ${baseDelay}ms before switching credential...`);
+                await normalizeProviderErrorMessage(error, { status, context: 'callApi' });
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
@@ -1839,26 +1846,8 @@ async saveCredentialsToFile(filePath, newData) {
         }
     }
 
-    _getErrorResponseText(error) {
-        const data = error?.response?.data;
-        if (data === undefined || data === null) {
-            return error?.message || '';
-        }
-        if (Buffer.isBuffer(data)) {
-            return data.toString('utf8');
-        }
-        if (typeof data === 'string') {
-            return data;
-        }
-        try {
-            return JSON.stringify(data);
-        } catch {
-            return String(data);
-        }
-    }
-
-    _isRefreshableForbidden(error) {
-        const text = this._getErrorResponseText(error).toLowerCase();
+    async _isRefreshableForbidden(error) {
+        const text = (await getNormalizedErrorResponseText(error)).toLowerCase();
         if (!text) return false;
 
         const nonRefreshablePatterns = [
@@ -1889,20 +1878,51 @@ async saveCredentialsToFile(filePath, newData) {
         return tokenRelated && refreshableAuthState;
     }
 
-    _handleForbiddenCredentialError(error, context) {
-        const responseText = this._getErrorResponseText(error);
+    async _handleForbiddenCredentialError(error, context) {
+        const responseText = await getNormalizedErrorResponseText(error);
+        await this._applyForbiddenCredentialState(error, context, responseText);
+    }
+
+    _buildForbiddenReason(context, responseText, tokenRelated = false) {
+        return buildHttpErrorReason(403, context, responseText, {
+            suffix: tokenRelated ? 'token-related' : ''
+        });
+    }
+
+    _buildNormalizedForbiddenError(error, responseText) {
         const responseSnippet = responseText ? responseText.substring(0, 500) : '';
 
+        if (responseSnippet) {
+            logger.warn(`[Kiro] 403 response body: ${responseSnippet}`);
+        }
+
+        return responseText ? {
+            ...error,
+            response: {
+                ...error?.response,
+                data: responseText
+            }
+        } : error;
+    }
+
+    async _applyForbiddenCredentialState(error, context, responseText) {
+        const responseSnippet = responseText ? responseText.substring(0, 500) : '';
         if (responseSnippet) {
             logger.warn(`[Kiro] 403 response body (${context}): ${responseSnippet}`);
         }
 
-        if (this._isRefreshableForbidden(error)) {
+        const normalizedError = this._buildNormalizedForbiddenError(error, responseText);
+
+        if (await this._isRefreshableForbidden(normalizedError)) {
+            const reason = this._buildForbiddenReason(context, responseText, true);
             logger.info(`[Kiro] Received token-related 403 in ${context}. Marking credential as needs refresh.`);
-            this._markCredentialNeedRefresh(`403 Forbidden (${context}) - token-related${responseSnippet ? `: ${responseSnippet}` : ''}`, error);
+            this._markCredentialNeedRefresh(reason, error);
+            error.message = reason;
         } else {
+            const reason = this._buildForbiddenReason(context, responseText, false);
             logger.info(`[Kiro] Received non-refreshable 403 in ${context}. Marking credential as unhealthy without refresh.`);
-            this._markCredentialUnhealthy(`403 Forbidden (${context})${responseSnippet ? `: ${responseSnippet}` : ''}`, error);
+            this._markCredentialUnhealthy(reason, error);
+            error.message = reason;
         }
     }
 
@@ -2023,6 +2043,11 @@ async saveCredentialsToFile(filePath, newData) {
      */
     async _handle402Error(error, context = 'unknown') {
         logger.info(`[Kiro] Received 402 (Quota Exceeded) in ${context}. Verifying usage limits...`);
+        const { reason: verifiedReason } = await normalizeProviderErrorMessage(error, {
+            status: 402,
+            context,
+            suffix: 'quota exceeded'
+        });
         try {
             // Verify usage limits to confirm quota exhaustion
             const usageLimits = await this.getUsageLimits();
@@ -2031,12 +2056,17 @@ async saveCredentialsToFile(filePath, newData) {
             logger.info(`[Kiro] Quota confirmed exhausted: ${usageLimits?.usedCount}/${usageLimits?.limitCount}`);
             // Calculate recovery time: 1st day of next month at 00:00:00 UTC
             const nextMonth = this._getNextMonthFirstDay();
-            this._markCredentialUnhealthyWithRecovery('402 Payment Required - Quota Exhausted', error, nextMonth);
+            this._markCredentialUnhealthyWithRecovery(verifiedReason, error, nextMonth);
         } catch (usageError) {
             logger.warn('[Kiro] Failed to verify usage limits:', usageError.message);
             // If we can't verify, still mark as unhealthy with recovery time
             const nextMonth = this._getNextMonthFirstDay();
-            this._markCredentialUnhealthyWithRecovery('402 Payment Required - Quota Exceeded (unverified)', error, nextMonth);
+            const { reason: fallbackReason } = await normalizeProviderErrorMessage(error, {
+                status: 402,
+                context,
+                suffix: 'quota exceeded (unverified)'
+            });
+            this._markCredentialUnhealthyWithRecovery(fallbackReason, error, nextMonth);
         }
         // Mark error for credential switch without recording error count
         error.shouldSwitchCredential = true;
@@ -2360,6 +2390,11 @@ async saveCredentialsToFile(filePath, newData) {
             // Handle 401 (Unauthorized) - try to refresh token first
             if (status === 401 && !isRetry) {
                 logger.info('[Kiro] Received 401 in stream. Triggering background refresh via PoolManager...');
+                await normalizeProviderErrorMessage(error, {
+                    status: 401,
+                    context: 'stream',
+                    suffix: 'triggering auto-refresh'
+                });
                 
                 // 1. 先刷新 UUID
                 const newUuid = this._refreshUuid();
@@ -2383,7 +2418,7 @@ async saveCredentialsToFile(filePath, newData) {
             // Handle 403 (Forbidden). Most Kiro 403s are account/policy/quota/profile issues,
             // not expired access tokens, so do not blindly refresh.
             if (status === 403 && !isRetry) {
-                this._handleForbiddenCredentialError(error, 'stream');
+                await this._handleForbiddenCredentialError(error, 'stream');
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
                 error.skipErrorCount = true;
@@ -2393,6 +2428,7 @@ async saveCredentialsToFile(filePath, newData) {
             // Handle 429 (Too Many Requests) - wait baseDelay then switch credential
             if (status === 429) {
                 logger.info(`[Kiro] Received 429 (Too Many Requests) in stream. Waiting ${baseDelay}ms before switching credential...`);
+                await normalizeProviderErrorMessage(error, { status: 429, context: 'stream' });
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
@@ -2403,6 +2439,7 @@ async saveCredentialsToFile(filePath, newData) {
             // Handle 5xx server errors - wait baseDelay then switch credential
             if (status >= 500 && status < 600) {
                 logger.info(`[Kiro] Received ${status} server error in stream. Waiting ${baseDelay}ms before switching credential...`);
+                await normalizeProviderErrorMessage(error, { status, context: 'stream' });
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;

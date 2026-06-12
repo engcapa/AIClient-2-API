@@ -9,7 +9,7 @@ import * as os from 'os';
 import * as readline from 'readline';
 import open from 'open';
 import { configureTLSSidecar } from '../../utils/proxy-utils.js';
-import { API_ACTIONS, formatExpiryTime, isRetryableNetworkError, formatExpiryLog, getRetryAfterMs } from '../../utils/common.js';
+import { API_ACTIONS, formatExpiryTime, isRetryableNetworkError, formatExpiryLog, getRetryAfterMs, normalizeProviderErrorMessage } from '../../utils/common.js';
 import { getProviderModels } from '../provider-models.js';
 import { handleGeminiCliOAuth } from '../../auth/oauth-handlers.js';
 import { getProxyConfigForProvider, getGoogleAuthProxyConfig, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
@@ -588,6 +588,7 @@ export class GeminiApiService {
             // Handle 401 (Unauthorized) - refresh auth and retry once
             if ((status === 401) && !isRetry) {
                 logger.info('[Gemini API] Received 401 Unauthorized. Triggering background refresh via PoolManager...');
+                await normalizeProviderErrorMessage(error, { status: 401, context: 'callApi' });
                 
                 // 标记当前凭证为不健康（会自动进入刷新队列）
                 const poolManager = getProviderPoolManager();
@@ -609,6 +610,7 @@ export class GeminiApiService {
             if (status === 429) {
                 const retryAfter = getRetryAfterMs(error);
                 if (retryAfter !== null) {
+                    await normalizeProviderErrorMessage(error, { status: 429, context: 'callApi' });
                     logger.warn(`[Gemini API] Received 429 with Retry-After: ${retryAfter}ms. Throwing to upper layer.`);
                     throw error;
                 }
@@ -622,6 +624,7 @@ export class GeminiApiService {
 
             // Handle other retryable errors (5xx server errors)
             if (status >= 500 && status < 600 && retryCount < maxRetries) {
+                await normalizeProviderErrorMessage(error, { status, context: 'callApi' });
                 const delay = baseDelay * Math.pow(2, retryCount);
                 logger.info(`[Gemini API] Received ${status} server error. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
@@ -678,6 +681,7 @@ export class GeminiApiService {
             // Handle 401 (Unauthorized) - refresh auth and retry once
             if ((status === 401) && !isRetry) {
                 logger.info('[Gemini API] Received 401 Unauthorized during stream. Triggering background refresh via PoolManager...');
+                await normalizeProviderErrorMessage(error, { status: 401, context: 'stream' });
                 
                 // 标记当前凭证为不健康（会自动进入刷新队列）
                 const poolManager = getProviderPoolManager();
@@ -699,6 +703,7 @@ export class GeminiApiService {
             if (status === 429) {
                 const retryAfter = getRetryAfterMs(error);
                 if (retryAfter !== null) {
+                    await normalizeProviderErrorMessage(error, { status: 429, context: 'stream' });
                     logger.warn(`[Gemini API] Received 429 with Retry-After: ${retryAfter}ms during stream. Throwing to upper layer.`);
                     throw error;
                 }
@@ -713,6 +718,7 @@ export class GeminiApiService {
 
             // Handle other retryable errors (5xx server errors)
             if (status >= 500 && status < 600 && retryCount < maxRetries) {
+                await normalizeProviderErrorMessage(error, { status, context: 'stream' });
                 const delay = baseDelay * Math.pow(2, retryCount);
                 logger.info(`[Gemini API] Received ${status} server error during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
@@ -776,6 +782,8 @@ export class GeminiApiService {
         if (!GEMINI_MODELS.includes(model)) {
             logger.warn(`[Gemini] Model '${model}' not found. Using default model: '${GEMINI_MODELS[0]}'`);
             baseModel = GEMINI_MODELS[0];
+            // 同步更新请求体中的模型名称，以便调用方知晓实际使用的模型
+            requestBody.model = baseModel;
         }
 
         const processedRequestBody = normalizeGeminiThinkingRequest(
@@ -828,6 +836,8 @@ export class GeminiApiService {
         if (!GEMINI_MODELS.includes(model)) {
             logger.warn(`[Gemini] Model '${model}' not found. Using default model: '${GEMINI_MODELS[0]}'`);
             baseModel = GEMINI_MODELS[0];
+            // 同步更新请求体中的模型名称，以便调用方知晓实际使用的模型
+            requestBody.model = baseModel;
         }
 
         const processedRequestBody = normalizeGeminiThinkingRequest(

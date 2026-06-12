@@ -572,6 +572,7 @@ function getFilteredProviders() {
             p.ANTIGRAVITY_OAUTH_CREDS_FILE_PATH,
             p.IFLOW_OAUTH_CREDS_FILE_PATH,
             p.CODEX_OAUTH_CREDS_FILE_PATH,
+            p.GROK_CLI_OAUTH_CREDS_FILE_PATH,
             p.GROK_COOKIE_TOKEN,
             p.FORWARD_API_KEY,
             p.checkModelName
@@ -1271,6 +1272,8 @@ function getFieldOrder(provider) {
             providerType = 'openai-iflow';
         } else if (provider.CODEX_OAUTH_CREDS_FILE_PATH) {
             providerType = 'openai-codex-oauth';
+        } else if (provider.GROK_CLI_OAUTH_CREDS_FILE_PATH) {
+            providerType = 'grok-cli-oauth';
         } else if (provider.GROK_COOKIE_TOKEN) {
             providerType = 'grok-web';
         } else if (provider.FORWARD_API_KEY) {
