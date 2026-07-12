@@ -12,36 +12,71 @@ import { PASSWORD } from '../utils/constants.js';
 const TOKEN_STORE_FILE = path.join(process.cwd(), 'configs', 'token-store.json');
 
 /**
- * 默认密码（当pwd文件不存在时使用）
+ * 默认密码（当 pwd 文件不存在时使用，仅首次启动时写入 PBKDF2 哈希）
  */
 const DEFAULT_PASSWORD = 'admin123';
 
 /**
- * 读取密码文件内容
- * 如果文件不存在或读取失败，返回默认密码
+ * 生成 PBKDF2 格式的密码哈希
+ * @param {string} password - 明文密码
+ * @returns {Promise<string>} pbkdf2:salt:hash 格式
+ */
+async function hashPassword(password) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = await new Promise((resolve, reject) =>
+        crypto.pbkdf2(password, salt, PASSWORD.PBKDF2_ITERATIONS, PASSWORD.PBKDF2_KEYLEN, PASSWORD.PBKDF2_DIGEST,
+            (err, key) => err ? reject(err) : resolve(key.toString('hex'))
+        )
+    );
+    return `pbkdf2:${salt}:${hash}`;
+}
+
+/**
+ * 读取密码文件内容，始终返回 PBKDF2 格式。
+ * - 文件不存在/为空 → 自动创建，写入默认密码的 PBKDF2 哈希
+ * - 文件内容是明文 → 自动升级为 PBKDF2 哈希（保证磁盘上永远是哈希，可以安全提交到 git）
+ * - 已经是 PBKDF2 格式 → 直接返回
  */
 export async function readPasswordFile() {
     const pwdFilePath = path.join(process.cwd(), 'configs', 'pwd');
     try {
-        // 使用异步方式检查文件是否存在并读取，避免竞态条件
         const password = await fs.readFile(pwdFilePath, 'utf8');
         const trimmedPassword = password.trim();
-        // 如果密码文件为空，使用默认密码
+
         if (!trimmedPassword) {
-            logger.info('[Auth] Password file is empty, using default password: ' + DEFAULT_PASSWORD);
-            return DEFAULT_PASSWORD;
+            // 空文件 → 写入默认密码的 PBKDF2 哈希
+            logger.info('[Auth] Password file is empty, initializing with default password (PBKDF2)...');
+            const hashed = await hashPassword(DEFAULT_PASSWORD);
+            await atomicWriteFile(pwdFilePath, hashed, { encoding: 'utf-8', mode: 0o600 });
+            return hashed;
         }
-        logger.info('[Auth] Successfully read password file');
+
+        if (!trimmedPassword.startsWith('pbkdf2:')) {
+            // 旧格式明文 → 自动升级为 PBKDF2 哈希（安全提交 git）
+            logger.warn('[Auth] Migrating plaintext password to PBKDF2 hash format...');
+            const hashed = await hashPassword(trimmedPassword);
+            await atomicWriteFile(pwdFilePath, hashed, { encoding: 'utf-8', mode: 0o600 });
+            logger.info('[Auth] Password migrated to PBKDF2 format — safe for git.');
+            return hashed;
+        }
+
         return trimmedPassword;
     } catch (error) {
-        // ENOENT means file does not exist, which is normal
         if (error.code === 'ENOENT') {
-            logger.info('[Auth] Password file does not exist, using default password: ' + DEFAULT_PASSWORD);
-        } else {
-            logger.error('[Auth] Failed to read password file:', error.code || error.message);
-            logger.info('[Auth] Using default password: ' + DEFAULT_PASSWORD);
+            // 文件不存在 → 创建并写入默认密码的 PBKDF2 哈希
+            logger.info('[Auth] Password file does not exist, creating with default password (PBKDF2)...');
+            try {
+                const hashed = await hashPassword(DEFAULT_PASSWORD);
+                await atomicWriteFile(pwdFilePath, hashed, { encoding: 'utf-8', mode: 0o600 });
+                logger.info('[Auth] Created pwd file with PBKDF2 hash — safe for git.');
+                return hashed;
+            } catch (writeError) {
+                logger.error('[Auth] Failed to create pwd file:', writeError.message);
+                return null;
+            }
         }
-        return DEFAULT_PASSWORD;
+        logger.error('[Auth] Failed to read password file:', error.code || error.message);
+        return null;
     }
 }
 
@@ -65,12 +100,9 @@ export async function validateCredentials(password) {
         return crypto.timingSafeEqual(Buffer.from(inputHash, 'hex'), Buffer.from(storedHash, 'hex'));
     }
 
-    // 旧格式：明文（兼容迁移期，建议通过 UI 重新设置密码以升级为哈希格式）
-    // 使用 timingSafeEqual 防止时序攻击
-    const a = Buffer.from(password.trim());
-    const b = Buffer.from(storedPassword);
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
+    // 明文密码不安全，拒绝验证。请通过 UI (Settings → Admin Password) 重设密码升级为 PBKDF2 哈希格式。
+    logger.warn('[Auth] Rejected: password stored in plaintext (insecure for git). Update via UI to PBKDF2 hash format.');
+    return false;
 }
 
 /**

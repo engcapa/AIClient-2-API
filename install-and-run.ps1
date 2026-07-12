@@ -60,12 +60,25 @@ if (-not (Test-Path "src\core\master.js")) {
     exit 1
 }
 
+# Read port from config.json if available, otherwise default to 3000
+$serverPort = 3000
+if (Test-Path "configs\config.json") {
+    try {
+        $config = Get-Content "configs\config.json" -Raw | ConvertFrom-Json
+        if ($config.SERVER_PORT) {
+            $serverPort = $config.SERVER_PORT
+        }
+    } catch {
+        Write-Warning "Failed to read configs\config.json, using default port 3000"
+    }
+}
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  Starting AIClient2API Server..." -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "Server will start at http://localhost:3000"
+Write-Host "Server will start at http://localhost:$serverPort"
 Write-Host "Press Ctrl+C to stop the server"
 Write-Host ""
 
-node src\core\master.js
+node src\core\master.js --port $serverPort

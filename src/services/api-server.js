@@ -9,6 +9,7 @@ import { createRequestHandler } from '../handlers/request-handler.js';
 import { discoverPlugins, getPluginManager } from '../core/plugin-manager.js';
 import { getTLSSidecar } from '../utils/tls-sidecar.js';
 import { HEALTH_CHECK } from '../utils/constants.js';
+import { readPasswordFile } from '../ui-modules/auth.js';
 
 /**
  * @license
@@ -256,6 +257,9 @@ function setupSignalHandlers() {
 async function startServer() {
     // Initialize configuration
     await initializeConfig(process.argv.slice(2), 'configs/config.json');
+
+    // 启动时自动迁移/创建 pwd 文件为 PBKDF2 哈希格式（保证可安全提交 git）
+    await readPasswordFile();
     
     // 自动关联 configs 目录中的配置文件到对应的提供商
     // logger.info('[Initialization] Checking for unlinked provider configs...');
