@@ -105,6 +105,8 @@ const translations = {
         'dashboard.routing.nodeName.kiro': 'Claude Kiro OAuth',
         'dashboard.routing.nodeName.openai': 'OpenAI Custom',
         'dashboard.routing.nodeName.atlascloud': 'AtlasCloud',
+        'dashboard.routing.nodeName.qiniu': 'Qiniu Cloud AI',
+        'dashboard.routing.nodeName.fenno': 'Fenno.ai',
         'dashboard.routing.nodeName.qwen': 'Qwen OAuth',
         'dashboard.routing.description.qwen': 'Qwen Code Plus',
         'dashboard.routing.nodeName.iflow': 'iFlow OAuth',
@@ -467,6 +469,7 @@ const translations = {
         'config.advanced.promptLogMode.file': '文件 (file)',
         'config.advanced.maxRetries': '提供商内最大重试次数',
         'config.advanced.baseDelay': '重试基础延迟(毫秒)',
+        'config.advanced.modelFallbackEnabled': '启用模型不存在自动 Fallback',
         'config.advanced.credentialSwitchMaxRetries': '坏凭证切换最大重试次数',
         'config.advanced.credentialSwitchMaxRetriesNote': '认证错误(401/403)后切换凭证的最大重试次数，默认 5 次',
         'config.advanced.rateLimitCooldownEnabled': '启用 429 短冷却',
@@ -674,6 +677,10 @@ const translations = {
         'providers.stat.errorCount': '错误次数',
         'providers.auth.generate': '生成授权',
         'providers.auth.importToken': '导入 Token',
+        'providers.register': '网站注册',
+        'providers.register.title': '打开提供商网站注册页',
+        'providers.docs': '接口文档',
+        'providers.docs.title': '打开提供商接口文档',
 
         // Modal Provider Manager
         'modal.provider.manage': '管理 {type} 提供商配置',
@@ -845,6 +852,12 @@ const translations = {
         'usage.time.hours': '{hours}小时{minutes}分',
         'usage.time.minutes': '{minutes}分钟',
         'usage.time.soon': '即将',
+        'usage.codex.resetCredits': '{count} 次',
+        'usage.codex.resetAction': '重置额度',
+        'usage.codex.resetActionShort': '重置',
+        'usage.codex.resetting': '正在重置 {name} 的 Codex 额度...',
+        'usage.codex.resetSuccess': 'Codex 额度重置成功',
+        'usage.codex.resetConfirm': '确定要重置 {name} 的 Codex 额度吗？这会消耗 1 次可重置次数。',
         
         // Logs
         'logs.title': '实时日志',
@@ -1299,6 +1312,8 @@ const translations = {
         'dashboard.routing.nodeName.kiro': 'Claude Kiro OAuth',
         'dashboard.routing.nodeName.openai': 'OpenAI Custom',
         'dashboard.routing.nodeName.atlascloud': 'AtlasCloud',
+        'dashboard.routing.nodeName.qiniu': 'Qiniu Cloud AI',
+        'dashboard.routing.nodeName.fenno': 'Fenno.ai',
         'dashboard.routing.nodeName.qwen': 'Qwen OAuth',
         'dashboard.routing.description.qwen': 'Qwen Code Plus',
         'dashboard.routing.nodeName.iflow': 'iFlow OAuth',
@@ -1662,6 +1677,7 @@ const translations = {
         'config.advanced.promptLogMode.file': 'File',
         'config.advanced.maxRetries': 'Provider Max Retries',
         'config.advanced.baseDelay': 'Base Retry Delay (ms)',
+        'config.advanced.modelFallbackEnabled': 'Enable Model Not Found Fallback',
         'config.advanced.warmupTarget': 'Warmup Target Nodes',
         'config.advanced.warmupTargetNote': 'Number of nodes to refresh on startup, default 0',
         'config.advanced.refreshConcurrencyPerProvider': 'Refresh Concurrency per Provider',
@@ -1869,6 +1885,10 @@ const translations = {
         'providers.stat.errorCount': 'Error Count',
         'providers.auth.generate': 'Gen Auth',
         'providers.auth.importToken': 'Import Token',
+        'providers.register': 'Register',
+        'providers.register.title': 'Open provider registration page',
+        'providers.docs': 'Docs',
+        'providers.docs.title': 'Open provider API documentation',
 
         // Modal Provider Manager
         'modal.provider.manage': 'Manage {type} Provider Config',
@@ -2039,6 +2059,12 @@ const translations = {
         'usage.time.hours': '{hours}h {minutes}m',
         'usage.time.minutes': '{minutes}m',
         'usage.time.soon': 'Soon',
+        'usage.codex.resetCredits': '{count} left',
+        'usage.codex.resetAction': 'Reset quota',
+        'usage.codex.resetActionShort': 'Reset',
+        'usage.codex.resetting': 'Resetting Codex quota for {name}...',
+        'usage.codex.resetSuccess': 'Codex quota reset succeeded',
+        'usage.codex.resetConfirm': 'Reset Codex quota for {name}? This will consume 1 reset credit.',
         
         // Logs
         'logs.title': 'Real-time Logs',

@@ -16,6 +16,40 @@
       "lastErrorTime": null
     }
   ],
+  "qiniu": [
+    {
+      "customName": "七牛云AI节点1",
+      "OPENAI_API_KEY": "sk-qiniu-key1",
+      "OPENAI_BASE_URL": "https://api.openai.com/v1",
+      "checkModelName": null,
+      "checkHealth": false,
+      "notSupportedModels": [],
+      "uuid": "5f579c65-d3c5-41b1-9985-9f6e3d7bf39e",
+      "isHealthy": true,
+      "isDisabled": false,
+      "lastUsed": null,
+      "usageCount": 0,
+      "errorCount": 0,
+      "lastErrorTime": null
+    }
+  ],
+  "fenno": [
+    {
+      "customName": "Fenno节点1",
+      "OPENAI_API_KEY": "sk-fenno-key1",
+      "OPENAI_BASE_URL": "https://api.openai.com/v1",
+      "checkModelName": null,
+      "checkHealth": false,
+      "notSupportedModels": [],
+      "uuid": "6f579c65-d3c5-41b1-9985-9f6e3d7bf39f",
+      "isHealthy": true,
+      "isDisabled": false,
+      "lastUsed": null,
+      "usageCount": 0,
+      "errorCount": 0,
+      "lastErrorTime": null
+    }
+  ],
   "openai-custom": [
     {
       "customName": "OpenAI节点1",

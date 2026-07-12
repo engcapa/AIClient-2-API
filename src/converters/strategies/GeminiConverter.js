@@ -255,7 +255,7 @@ export class GeminiConverter extends BaseConverter {
 
         // 处理系统指令
         if (geminiRequest.systemInstruction && Array.isArray(geminiRequest.systemInstruction.parts)) {
-            const systemContent = this.processGeminiPartsToOpenAIContent(geminiRequest.systemInstruction.parts);
+            const { content: systemContent } = this.processGeminiPartsToOpenAIContent(geminiRequest.systemInstruction.parts);
             if (systemContent) {
                 openaiRequest.messages.push({
                     role: 'system',
@@ -268,13 +268,17 @@ export class GeminiConverter extends BaseConverter {
         if (geminiRequest.contents && Array.isArray(geminiRequest.contents)) {
             geminiRequest.contents.forEach(content => {
                 if (content && Array.isArray(content.parts)) {
-                    const openaiContent = this.processGeminiPartsToOpenAIContent(content.parts);
-                    if (openaiContent && openaiContent.length > 0) {
+                    const { content: openaiContent, reasoning_content } = this.processGeminiPartsToOpenAIContent(content.parts);
+                    if ((openaiContent && openaiContent.length > 0) || reasoning_content) {
                         const openaiRole = content.role === 'model' ? 'assistant' : content.role;
-                        openaiRequest.messages.push({
+                        const message = {
                             role: openaiRole,
                             content: openaiContent
-                        });
+                        };
+                        if (reasoning_content) {
+                            message.reasoning_content = reasoning_content;
+                        }
+                        openaiRequest.messages.push(message);
                     }
                 }
             });
@@ -287,7 +291,7 @@ export class GeminiConverter extends BaseConverter {
      * Gemini响应 -> OpenAI响应
      */
     toOpenAIResponse(geminiResponse, model) {
-        const content = this.processGeminiResponseContent(geminiResponse);
+        const { content, reasoning_content } = this.processGeminiResponseContent(geminiResponse);
         
         // 提取 tool_calls
         const toolCalls = [];
@@ -323,6 +327,10 @@ export class GeminiConverter extends BaseConverter {
             role: "assistant",
             content: content
         };
+
+        if (reasoning_content) {
+            message.reasoning_content = reasoning_content;
+        }
         
         // 只有在有 tool_calls 时才添加该字段
         if (toolCalls.length > 0) {
@@ -375,6 +383,7 @@ export class GeminiConverter extends BaseConverter {
         if (!candidate) return null;
 
         let content = '';
+        let reasoning_content = '';
         const toolCalls = [];
         
         // 从parts中提取文本和tool calls
@@ -382,7 +391,11 @@ export class GeminiConverter extends BaseConverter {
         if (parts && Array.isArray(parts)) {
             for (const part of parts) {
                 if (part.text) {
-                    content += part.text;
+                    if (part.thought === true) {
+                        reasoning_content += part.text;
+                    } else {
+                        content += part.text;
+                    }
                 }
                 if (part.functionCall) {
                     toolCalls.push({
@@ -429,6 +442,7 @@ export class GeminiConverter extends BaseConverter {
         // 构建delta对象
         const delta = {};
         if (content) delta.content = content;
+        if (reasoning_content) delta.reasoning_content = reasoning_content;
         if (toolCalls.length > 0) delta.tool_calls = toolCalls;
 
         // Don't return empty delta chunks
@@ -497,10 +511,18 @@ export class GeminiConverter extends BaseConverter {
             if (!part) return;
             
             if (typeof part.text === 'string') {
-                contentArray.push({
-                    type: 'text',
-                    text: part.text
-                });
+                if (part.thought === true) {
+                    contentArray.push({
+                        type: 'text',
+                        text: part.text,
+                        reasoning: true // 标记以便后续处理
+                    });
+                } else {
+                    contentArray.push({
+                        type: 'text',
+                        text: part.text
+                    });
+                }
             }
             
             if (part.inlineData) {
@@ -544,21 +566,29 @@ export class GeminiConverter extends BaseConverter {
      * 处理Gemini响应内容
      */
     processGeminiResponseContent(geminiResponse) {
-        if (!geminiResponse || !geminiResponse.candidates) return '';
+        if (!geminiResponse || !geminiResponse.candidates) return { content: '', reasoning_content: '' };
         
         const contents = [];
+        const reasoningContents = [];
         
         geminiResponse.candidates.forEach(candidate => {
             if (candidate.content && candidate.content.parts) {
                 candidate.content.parts.forEach(part => {
                     if (part.text) {
-                        contents.push(part.text);
+                        if (part.thought === true) {
+                            reasoningContents.push(part.text);
+                        } else {
+                            contents.push(part.text);
+                        }
                     }
                 });
             }
         });
         
-        return contents.join('\n');
+        return {
+            content: contents.join('\n'),
+            reasoning_content: reasoningContents.join('\n')
+        };
     }
 
     // =========================================================================
@@ -1173,10 +1203,68 @@ export class GeminiConverter extends BaseConverter {
     }
 
     /**
-     * Gemini响应 -> OpenAI Responses响应
+     * 处理Gemini parts到OpenAI内容
      */
-    _buildResponsesMessageItemId(responseId, index = 0) {
-        return responseId ? `msg_${responseId}_${index}` : `msg_${uuidv4().replace(/-/g, '')}`;
+    processGeminiPartsToOpenAIContent(parts) {
+        if (!parts || !Array.isArray(parts)) return { content: '', reasoning_content: '' };
+        
+        const contentArray = [];
+        const reasoningParts = [];
+        
+        parts.forEach(part => {
+            if (!part) return;
+            
+            if (typeof part.text === 'string') {
+                if (part.thought === true) {
+                    reasoningParts.push(part.text);
+                } else {
+                    contentArray.push({
+                        type: 'text',
+                        text: part.text
+                    });
+                }
+            }
+            
+            if (part.inlineData) {
+                const { mimeType, data } = part.inlineData;
+                if (mimeType && data) {
+                    contentArray.push({
+                        type: 'image_url',
+                        image_url: {
+                            url: `data:${mimeType};base64,${data}`
+                        }
+                    });
+                }
+            }
+            
+            if (part.fileData) {
+                const { mimeType, fileUri } = part.fileData;
+                if (mimeType && fileUri) {
+                    if (mimeType.startsWith('image/')) {
+                        contentArray.push({
+                            type: 'image_url',
+                            image_url: {
+                                url: fileUri
+                            }
+                        });
+                    } else if (mimeType.startsWith('audio/')) {
+                        contentArray.push({
+                            type: 'text',
+                            text: `[Audio file: ${fileUri}]`
+                        });
+                    }
+                }
+            }
+        });
+        
+        const finalContent = contentArray.length === 1 && contentArray[0].type === 'text'
+            ? contentArray[0].text
+            : contentArray;
+
+        return {
+            content: finalContent,
+            reasoning_content: reasoningParts.join('\n')
+        };
     }
 
     _buildResponsesFunctionItemId(callId) {
@@ -1322,7 +1410,7 @@ export class GeminiConverter extends BaseConverter {
     }
 
     toOpenAIResponsesResponse(geminiResponse, model) {
-        const content = this.processGeminiResponseContent(geminiResponse);
+        const { content, reasoning_content } = this.processGeminiResponseContent(geminiResponse);
         const textContent = typeof content === 'string' ? content : JSON.stringify(content);
 
         let output = [];
@@ -1365,7 +1453,7 @@ export class GeminiConverter extends BaseConverter {
         }
         output.push(...toolCalls);
 
-        return {
+        const response = {
             background: false,
             created_at: Math.floor(Date.now() / 1000),
             error: null,
@@ -1407,6 +1495,12 @@ export class GeminiConverter extends BaseConverter {
             },
             user: null
         };
+
+        if (reasoning_content) {
+            response.reasoning_content = reasoning_content;
+        }
+
+        return response;
     }
 
     /**
@@ -1436,11 +1530,23 @@ export class GeminiConverter extends BaseConverter {
                 
                 // 提取文本内容
                 if (parts && Array.isArray(parts)) {
-                    const textParts = parts.filter(part => part && typeof part.text === 'string');
+                    const textParts = parts.filter(part => part && typeof part.text === 'string' && part.thought !== true);
                     if (textParts.length > 0) {
                         const text = textParts.map(part => part.text).join('');
                         this._ensureOpenAIResponsesTextStarted(stateKey, state, events);
                         events.push(generateOutputTextDelta(stateKey, text));
+                    }
+
+                    // [FIX] 提取推理内容
+                    const thoughtParts = parts.filter(part => part && typeof part.text === 'string' && part.thought === true);
+                    if (thoughtParts.length > 0) {
+                        const thoughtText = thoughtParts.map(part => part.text).join('');
+                        this._ensureOpenAIResponsesStreamStarted(stateKey, state, events);
+                        events.push({
+                            type: 'response.reasoning_summary_text.delta',
+                            response_id: state.responseId,
+                            delta: thoughtText
+                        });
                     }
 
                     const functionParts = parts.filter(part => part && part.functionCall);
@@ -1559,7 +1665,8 @@ export class GeminiConverter extends BaseConverter {
                 const parts = content.parts || [];
                 
                 parts.forEach(part => {
-                    if (part.text) {
+                    // [FIX] 过滤 Gemini 3.1 Pro 的思考过程 (thought: true)
+                    if (part.text && part.thought !== true) {
                         codexRequest.input.push({
                             type: 'message',
                             role: role,

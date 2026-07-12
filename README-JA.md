@@ -70,15 +70,14 @@
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
-      <a href="https://visioncoder.com">
+      <a href="https://visioncoder.cn">
         <img src="static/visioncoder.png" alt="VisionCoder Sponsor" width="180">
       </a>
     </td>
     <td width="75%" align="left" valign="middle">
-      VisionCoder による本プロジェクトへのスポンサーに感謝します！VisionCoder 開発プラットフォームは信頼性が高く効率的な API 中継サービスプロバイダーであり、Claude Code、Codex、Gemini などの主要な AI モデルへのアクセスを提供しています。開発者やチームが AI 機能をより簡単に統合し、生産性を向上させるのを支援します。VisionCoder は本ソフトウェアのユーザー向けに期間限定の <a href="https://visioncoder.com">Token Plan</a> 特典を提供しています：<strong>1ヶ月の購入で1ヶ月分を無料で進呈</strong>。
+      Thanks to VisionCoder for supporting this project. <a href="https://visioncoder.cn">VisionCoder Developer Platform</a> is a reliable and efficient API relay service provider, offering access to mainstream AI models such as Claude Code, Codex, and Gemini. It helps developers and teams integrate AI capabilities more easily and improve productivity. Additionally, VisionCoder now offers retail channels for <strong>Claude Max 200 and GPT Pro 200 premium accounts</strong>, providing users with instant access to top-tier AI computing power and features.
     </td>
   </tr>
-  <!--
   <tr>
     <td width="25%" align="center" valign="middle">
       <a href="https://www.atlascloud.ai/console/coding-plan">
@@ -86,10 +85,9 @@
       </a>
     </td>
     <td width="75%" align="left" valign="middle">
-      Atlas Cloud による本プロジェクトへのスポンサーに感謝します！Atlas Cloud は、開発者が動画生成、画像生成、および LLM API にアクセスするための单二の AI API を提供する全モーダル AI 推論プラットフォームです。複数のベンダーの統合を管理する代わりに、一度接続するだけですべてのモダリティにわたる 300 以上の厳選されたモデルに統合アクセスできます。よりリーズナブルな API アクセスのために、Atlas Cloud の新しい<a href="https://www.atlascloud.ai/console/coding-plan">コーディングプランプロモーション (coding plan)</a>をぜひチェックしてください。
+      Atlas Cloud による本プロジェクトへのスポンサーに感謝します！Atlas Cloud は、開発者が動画生成、画像生成、および LLM API にアクセスするための单二の AI API を提供する<strong>全モーダル AI 推論プラットフォーム</strong>です。複数のベンダーの統合を管理する代わりに、一度接続するだけですべてのモダリティにわたる <strong>300 以上の厳選されたモデル</strong>に統合アクセスできます。よりリーズナブルな API アクセスのために、Atlas Cloud の新しい<a href="https://www.atlascloud.ai/console/coding-plan">コーディングプランプロモーション (coding plan)</a>をぜひチェックしてください。
     </td>
   </tr>
-  -->
   <!--
   <tr>
     <td width="25%" align="center" valign="middle">
@@ -127,6 +125,26 @@
     </td>
   </tr>
 -->
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://api.fenno.ai/register?redirect=/purchase?tab=subscription%26group=16&aff=2EW65KEQC938">
+        <img src="static/fenno.png" alt="Fenno.ai Sponsor" width="180">
+      </a>
+    </td>
+    <td width="75%" align="left" valign="middle">
+      Fenno.ai は安定かつ高効率な API リレーサービスプロバイダーで、現在は主に Codex リレーサービスを提供しています。OpenAI および Anthropic プロトコルに対応し、Codex、Claude Code、OpenCode などの主要なコーディングツールへ柔軟に接続できます。1 日あたり数千億 Token 規模のエンタープライズ利用を安定して支え、国内外法人の法人間決済と請求書発行にも対応しています。Fenno.ai は CC-Connect ユーザー向けに特別特典を提供しています：<a href="https://api.fenno.ai/register?redirect=/purchase?tab=subscription%26group=16&aff=2EW65KEQC938">このリンクから</a><strong>9.9 元 / 150 ドル相当额度</strong>の Coding Plan を購読でき、友人招待で最大 <strong>20% の報酬</strong>を受け取れます。
+    </td>
+  </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://s.qiniu.com/FRF7bq">
+        <img src="static/qiniu.png" alt="Qiniu Cloud AI Sponsor" width="180">
+      </a>
+    </td>
+    <td width="75%" align="left" valign="middle">
+      七牛云 AI は七牛云（02567.HK）傘下の<strong>エンタープライズ向け大規模モデル MaaS プラットフォーム</strong>です。世界中の <strong>150 以上の主要モデル</strong>をワンストップで呼び出せ、主要モデルプロバイダーのプロトコルと互換性があり、テキスト、画像、音声、動画、ファイル処理などのフルモーダル処理能力をカバーし、169 万以上の企業および開発者ユーザーにサービスを提供しています。特別特典：法人ユーザーは<a href="https://s.qiniu.com/FRF7bq"><strong>1200 万 Token</strong> を無料で受け取れ</a>、友人招待で最大<strong>百億 Token</strong>を獲得できます。
+    </td>
+  </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
       <img src="static/wechat.png" alt="Sponsor Contact" width="150">

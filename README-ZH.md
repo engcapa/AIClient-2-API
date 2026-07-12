@@ -70,15 +70,14 @@
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
-      <a href="https://visioncoder.com">
+      <a href="https://visioncoder.cn">
         <img src="static/visioncoder.png" alt="VisionCoder Sponsor" width="180">
       </a>
     </td>
     <td width="75%" align="left" valign="middle">
-      感谢 VisionCoder 对本项目的支持。VisionCoder 开发平台 是一个可靠高效的 API 中继服务提供商，提供 Claude Code、Codex、Gemini 等主流 AI 模型，帮助开发者和团队更轻松地集成 AI 功能，提升工作效率。VisionCoder 还为我们的用户提供 <a href="https://visioncoder.com">Token Plan</a> 限时活动：<strong>购买 1 个月，赠送 1 个月</strong>。
+      感谢 VisionCoder 对本项目的支持。<a href="https://visioncoder.cn">VisionCoder 开发平台</a> 是一个可靠高效的 API 中继服务提供商，提供 Claude Code、Codex、Gemini 等主流 AI 模型，帮助开发者和团队更轻松地集成 AI 功能，提升工作效率。此外，VisionCoder 还提供 <strong>Claude Max 200 与 GPT Pro 200 高级成品号</strong>的独家售卖渠道，助力体验全网顶配 AI 的算力与体验。
     </td>
   </tr>
-  <!--
   <tr>
     <td width="25%" align="center" valign="middle">
       <a href="https://www.atlascloud.ai/console/coding-plan">
@@ -86,10 +85,9 @@
       </a>
     </td>
     <td width="75%" align="left" valign="middle">
-      感谢 Atlas Cloud 赞助本项目！Atlas Cloud 是一款全模态 AI 推理平台，为开发者提供单一的 AI API 以轻松接入视频生成、图像生成和大语言模型 API。无需管理多个供应商集成，您只需连接一次，即可统一访问跨所有模态的 300 多种精选模型。欢迎查看 Atlas Cloud 全新的 <a href="https://www.atlascloud.ai/console/coding-plan">编码计划促销活动 (coding plan)</a>，以获取更具性价比的 API 接入服务。
+      感谢 Atlas Cloud 赞助本项目！Atlas Cloud 是一款<strong>全模态 AI 推理平台</strong>，为开发者提供单一的 AI API 以轻松接入视频生成、图像生成和大语言模型 API。无需管理多个供应商集成，您只需连接一次，即可统一访问跨所有模态的 <strong>300 多种精选模型</strong>。欢迎查看 Atlas Cloud 全新的 <a href="https://www.atlascloud.ai/console/coding-plan">编码计划促销活动 (coding plan)</a>，以获取更具性价比的 API 接入服务。
     </td>
   </tr>
-  -->
   <!--
   <tr>
     <td width="25%" align="center" valign="middle">
@@ -127,6 +125,26 @@
     </td>
   </tr>
 -->
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://api.fenno.ai/register?redirect=/purchase?tab=subscription%26group=16&aff=2EW65KEQC938">
+        <img src="static/fenno.png" alt="Fenno.ai Sponsor" width="180">
+      </a>
+    </td>
+    <td width="75%" align="left" valign="middle">
+      Fenno.ai 是一家稳定、高效的 API 中转服务商，目前主要提供 Codex 中转服务，兼容 OpenAI 及 Anthropic 协议，可灵活接入 Codex、Claude Code、OpenCode 等主流编程工具，可稳定支撑千亿 Token/日的企业级调用需求，支持国内及海外主体公对公结算、开票。Fenno.ai 为 CC-Connect 的用户提供了专属福利：<a href="https://api.fenno.ai/register?redirect=/purchase?tab=subscription%26group=16&aff=2EW65KEQC938">通过此链接</a>即可订阅 <strong>9.9 元/150刀额度</strong>的超值 Coding Plan，邀请好友最高可享 <strong>20% 奖励</strong>，多邀多得！
+    </td>
+  </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://s.qiniu.com/FRF7bq">
+        <img src="static/qiniu.png" alt="七牛云 AI Sponsor" width="180">
+      </a>
+    </td>
+    <td width="75%" align="left" valign="middle">
+      七牛云 AI 是七牛云（02567.HK）旗下<strong>企业级大模型 MaaS 平台</strong>，可一站式调用全球 <strong>150+ 主流模型</strong>，兼容全球主流模型厂商协议，覆盖文本、图像、音频、视频、文件处理等全模态处理能力，服务超过 169 万企业及开发者用户。专属福利：企业用户可<a href="https://s.qiniu.com/FRF7bq">免费领 <strong>1200 万 Token</strong></a>，邀请好友最高得<strong>百亿 Token</strong>。
+    </td>
+  </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
       <img src="static/wechat.png" alt="Sponsor Contact" width="150">
@@ -741,6 +759,29 @@ kill -9 <PID>
 - **增加超时时间**：在客户端配置中增加请求超时时间
 - **检查代理设置**：如使用代理，确保代理支持长连接
 - **查看服务日志**：检查是否有错误信息
+
+**上游空响应自动重试**（目前 Kiro `claude-kiro-oauth` 在用，机制本身与 provider 无关）：
+
+在 Kiro 反代场景下，上游偶尔会返回 HTTP 200 但内容完全为空（没有文本、没有工具调用、也没有思考内容，`output_tokens: 0`）。这类空回如果直接放行给客户端，Claude Code 等客户端会认为"没有任何动作"，进而自行追加一条"请继续"之类的消息，导致对话历史（以及 `input_tokens`）不断累积膨胀，形成恶性循环。
+
+本项目针对这种情况内置了检测与重试机制：
+
+- 检测到上游返回真正的空响应时，不再伪造一次成功的 `end_turn`，而是在代理内部**用同一份请求体**（历史不会变大）直接重试，最多重试 `EMPTY_RESPONSE_MAX_RETRIES` 次（默认 `2`），每次重试前等待 `EMPTY_RESPONSE_RETRY_DELAY_MS` 毫秒（默认 `500`）。
+- 该重试预算与凭证切换重试次数（`CREDENTIAL_SWITCH_MAX_RETRIES`）**互相独立、分开计数**，不会因为一次空回就把凭证切换的重试预算提前耗光，也不会因为切换凭证重试而额外增加本次请求的历史/token 开销。
+- 正常有内容的响应不受影响：只要上游返回过任意文本、工具调用或思考内容中的一种，就不会触发重试逻辑，流式响应的首字延迟基本不变。
+- 重试次数用尽后，会向客户端返回明确的错误信息（而不是静默的空 `end_turn`），可以在日志中搜索 `empty response` 或 `isEmptyUpstreamResponse` 相关关键字确认是否命中过该问题，以及命中频率。
+- 该机制不绑定具体 provider：任何 provider 只要在检测到空响应时抛出带 `isEmptyUpstreamResponse` 标记的错误，就会自动复用这套重试逻辑。
+
+可在 `configs/config.json` 中调整：
+
+```json
+{
+  "EMPTY_RESPONSE_MAX_RETRIES": 2,
+  "EMPTY_RESPONSE_RETRY_DELAY_MS": 500
+}
+```
+
+> 注意：这只解决"上游静默返回空内容"这一类中断（本文档称为 A 类）。如果模型只是用文字描述了接下来要做什么但没有真正调用工具（B 类，`stop_reason: end_turn` 且 `output_tokens > 0`），属于模型/提示词层面的行为，代理无法自动判断并重试，建议通过 `/clear` 清空会话历史或在提示词中更明确地要求模型直接执行工具调用来缓解。
 
 ### 9. 配置修改不生效
 

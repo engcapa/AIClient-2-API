@@ -292,7 +292,7 @@ export function formatKiroUsage(usageData) {
         if (isWithinWindow(breakdown.nextDateReset)) {
             const used = breakdown.currentUsageWithPrecision ?? breakdown.currentUsage;
             const limit = breakdown.usageLimitWithPrecision ?? breakdown.usageLimit;
-            const percent = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+            const percent = limit > 0 ? (used / limit) * 100 : 0;
             
             items.push({
                 id: breakdown.resourceType,
@@ -314,7 +314,7 @@ export function formatKiroUsage(usageData) {
 
                 const bUsed = bonus.currentUsageWithPrecision ?? bonus.currentUsage ?? 0;
                 const bLimit = bonus.usageLimitWithPrecision ?? bonus.usageLimit ?? 0;
-                const bPercent = bLimit > 0 ? Math.min(100, (bUsed / bLimit) * 100) : 0;
+                const bPercent = bLimit > 0 ? (bUsed / bLimit) * 100 : 0;
                 const isExpired = bonus.status === 'EXPIRED';
                 
                 items.push({
@@ -337,7 +337,7 @@ export function formatKiroUsage(usageData) {
             if (isWithinWindow(ft.freeTrialExpiry)) {
                 const ftUsed = ft.currentUsageWithPrecision ?? ft.currentUsage ?? 0;
                 const ftLimit = ft.usageLimitWithPrecision ?? ft.usageLimit ?? 0;
-                const ftPercent = ftLimit > 0 ? Math.min(100, (ftUsed / ftLimit) * 100) : 0;
+                const ftPercent = ftLimit > 0 ? (ftUsed / ftLimit) * 100 : 0;
                 const isExpired = ft.freeTrialStatus === 'EXPIRED';
                 
                 items.push({
@@ -359,7 +359,7 @@ export function formatKiroUsage(usageData) {
     const activeItems = items.filter(item => !item.isExpired);
     const totalUsed = activeItems.reduce((sum, item) => sum + item.used, 0);
     const totalLimit = activeItems.reduce((sum, item) => sum + item.limit, 0);
-    const usedPercent = totalLimit > 0 ? Math.min(100, (totalUsed / totalLimit) * 100) : 0;
+    const usedPercent = totalLimit > 0 ? (totalUsed / totalLimit) * 100 : 0;
 
     // 兼容多种用户信息和计划信息的路径
     let plan = usageData.subscriptionInfo?.subscriptionTitle || 
@@ -616,37 +616,57 @@ export function formatGrokUsage(usageData) {
 
 /**
  * 格式化 Grok CLI 用量。
- * xAI Grok CLI OAuth 当前没有稳定的额度查询接口，这里展示账号与凭据状态。
  */
 export function formatGrokCliUsage(usageData) {
     if (!usageData) return null;
 
+    const summaryData = usageData.summary || {};
+    const config = usageData.config || {};
+    const products = Array.isArray(summaryData.products) ? summaryData.products : [];
+    const weeklyLimitPercent = summaryData.weeklyLimitPercent ?? config.creditUsagePercent ?? 0;
+    const periodEnd = summaryData.periodEnd || config.currentPeriod?.end || config.billingPeriodEnd || usageData.expiresAt || null;
+    const plan = summaryData.grokAccountTier || summaryData.subscriptionTier || config.subscription_tier || null;
+
+    const items = products.map(item => {
+        const percent = item.usagePercent ?? 0;
+        return {
+            id: item.product || 'product',
+            label: item.product || 'Product Usage',
+            used: percent,
+            limit: 100,
+            percent,
+            unit: 'percent',
+            status: getStatus(percent),
+            resetAt: periodEnd
+        };
+    });
+
+    if (items.length === 0) {
+        items.push({
+            id: 'weekly_limit',
+            label: 'Weekly Limit',
+            used: weeklyLimitPercent,
+            limit: 100,
+            percent: weeklyLimitPercent,
+            unit: 'percent',
+            status: getStatus(weeklyLimitPercent),
+            resetAt: periodEnd
+        });
+    }
+
     return {
         summary: {
-            usedPercent: 0,
-            status: 'normal',
-            resetAt: usageData.expiresAt || null,
-            plan: 'XAI',
-            planClass: getPlanClass('XAI'),
-            unit: 'status',
-            totalUsed: 0,
-            totalLimit: 0
+            usedPercent: weeklyLimitPercent,
+            status: getStatus(weeklyLimitPercent),
+            resetAt: periodEnd,
+            plan,
+            planClass: plan ? getPlanClass(plan) : 'plan-default',
+            unit: 'percent'
         },
         user: {
             email: usageData.account || null
         },
-        items: [
-            {
-                id: 'credential',
-                label: 'OAuth Credential',
-                used: 0,
-                limit: 1,
-                percent: 0,
-                unit: 'status',
-                status: 'normal',
-                resetAt: usageData.expiresAt || null
-            }
-        ],
+        items,
         raw: usageData
     };
 }
@@ -661,6 +681,8 @@ export function formatCodexUsage(usageData) {
     const rateLimit = usageData.rate_limit || usageData.rateLimit;
     const primary = rateLimit?.primary_window || rateLimit?.primaryWindow;
     const secondary = rateLimit?.secondary_window || rateLimit?.secondaryWindow;
+    const resetCredits = usageData.rate_limit_reset_credits || usageData.rateLimitResetCredits;
+    const resetAvailableCount = Number(resetCredits?.available_count ?? resetCredits?.availableCount ?? 0) || 0;
     
     const primaryUsedPercent = primary?.used_percent ?? primary?.usedPercent ?? 0;
     const secondaryUsedPercent = secondary?.used_percent ?? secondary?.usedPercent ?? 0;
@@ -715,7 +737,8 @@ export function formatCodexUsage(usageData) {
             resetAt: formatTimestamp(worstResetAtTimestamp),
             plan,
             planClass: getPlanClass(plan),
-            unit: 'percent'
+            unit: 'percent',
+            resetAvailableCount
         },
         user: { 
             email: usageData.account || null

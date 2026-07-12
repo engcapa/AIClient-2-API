@@ -707,6 +707,9 @@ export class QwenApiService {
 
             // 检查模型是否存在于列表中
             if (processedBody.model && !QWEN_MODELS.includes(processedBody.model)) {
+                if (this.config.MODEL_FALLBACK_ENABLED === false) {
+                    throw new Error(`[QwenApiService] 模型不存在: ${processedBody.model}`);
+                }
                 logger.warn(`[QwenApiService] Model '${processedBody.model}' not found in supported list. Using default: '${QWEN_MODELS[0]}'`);
                 processedBody.model = QWEN_MODELS[0];
             }

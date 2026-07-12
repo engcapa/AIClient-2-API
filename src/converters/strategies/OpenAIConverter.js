@@ -39,6 +39,15 @@ import {
 } from '../../providers/openai/openai-responses-core.mjs';
 
 /**
+ * 清洗 tool_use/functionCall ID，只保留 [a-zA-Z0-9_-] 字符
+ * Claude API 要求 tool_use.id 匹配 ^[a-zA-Z0-9_-]+$
+ */
+function sanitizeToolId(id) {
+    if (!id) return id;
+    return String(id).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+/**
  * OpenAI转换器类
  * 实现OpenAI协议到其他协议的转换
  */
@@ -674,13 +683,13 @@ export class OpenAIConverter extends BaseConverter {
         const messages = openaiRequest.messages || [];
         const model = openaiRequest.model || '';
         
-        // 构建 tool_call_id -> function_name 映射
+        // 构建 tool_call_id -> function_name 映射（ID 统一清洗，与后续查找保持一致）
         const tcID2Name = {};
         for (const message of messages) {
             if (message.role === 'assistant' && message.tool_calls) {
                 for (const tc of message.tool_calls) {
                     if (tc.type === 'function' && tc.id && tc.function?.name) {
-                        tcID2Name[tc.id] = tc.function.name;
+                        tcID2Name[sanitizeToolId(tc.id)] = tc.function.name;
                     }
                 }
             }
@@ -688,29 +697,31 @@ export class OpenAIConverter extends BaseConverter {
             if (message.role === 'assistant' && Array.isArray(message.content)) {
                 for (const item of message.content) {
                     if (item && item.type === 'tool_use' && item.id && item.name) {
-                        tcID2Name[item.id] = item.name;
+                        tcID2Name[sanitizeToolId(item.id)] = item.name;
                     }
                 }
             }
         }
 
-        // 构建 tool_call_id -> response 映射
+        // 构建 tool_call_id -> response 映射（ID 统一清洗，与后续查找保持一致）
         const toolResponses = {};
         for (const message of messages) {
             if (message.role === 'tool' && message.tool_call_id) {
-                toolResponses[message.tool_call_id] = message.content;
+                toolResponses[sanitizeToolId(message.tool_call_id)] = message.content;
             }
             // Claude 格式：user content 数组中的 tool_result
             if (message.role === 'user' && Array.isArray(message.content)) {
                 for (const item of message.content) {
                     if (item && item.type === 'tool_result' && item.tool_use_id) {
-                        toolResponses[item.tool_use_id] = item.content;
+                        toolResponses[sanitizeToolId(item.tool_use_id)] = item.content;
                     }
                 }
             }
         }
 
         const processedMessages = [];
+        // [FIX] 跟踪已生成的 functionResponse ID，防止重复（Claude API 要求每个 tool_use 只有一个 tool_result）
+        const emittedToolResultIds = new Set();
         let systemInstruction = null;
 
         for (let i = 0; i < messages.length; i++) {
@@ -854,6 +865,33 @@ export class OpenAIConverter extends BaseConverter {
                                     }
                                 }
                                 break;
+                            // [FIX] 处理嵌入在 user 消息中的 Claude 格式 tool_result 块（去重）
+                            case 'tool_result': {
+                                const trId = sanitizeToolId(item.tool_use_id) || `tool_result_${uuidv4().replace(/-/g, '')}`;
+                                if (!emittedToolResultIds.has(trId)) {
+                                    emittedToolResultIds.add(trId);
+                                    const trName = tcID2Name[trId] || trId;
+                                    let trContent = item.content;
+                                    if (Array.isArray(trContent)) {
+                                        trContent = trContent
+                                            .filter(c => c && c.type === 'text')
+                                            .map(c => c.text)
+                                            .join('\n') || JSON.stringify(trContent);
+                                    } else if (typeof trContent !== 'string') {
+                                        trContent = JSON.stringify(trContent);
+                                    }
+                                    node.parts.push({
+                                        functionResponse: {
+                                            name: trName,
+                                            id: trId,
+                                            response: {
+                                                result: trContent
+                                            }
+                                        }
+                                    });
+                                }
+                                break;
+                            }
                         }
                     }
                 }
@@ -875,17 +913,20 @@ export class OpenAIConverter extends BaseConverter {
                             node.parts.push({ text: item.text });
                         } else if (item.type === 'tool_use') {
                             // Claude 格式 tool_use -> Gemini functionCall
-                            const fid = item.id || '';
+                            // [FIX] 当 id 缺失时自动生成，确保 Antigravity 转 Claude 时 tool_use.id 不为空
+                            const fid = sanitizeToolId(item.id) || `toolu_${uuidv4().replace(/-/g, '')}`;
                             const fname = item.name || '';
                             const argsObj = typeof item.input === 'string' ? (() => { try { return JSON.parse(item.input); } catch(e) { return {}; } })() : (item.input || {});
+                            const fc = {
+                                name: fname,
+                                args: argsObj,
+                                id: fid
+                            };
                             node.parts.push({
-                                functionCall: {
-                                    name: fname,
-                                    args: argsObj
-                                },
+                                functionCall: fc,
                                 thoughtSignature: OpenAIConverter.GEMINI_OPENAI_THOUGHT_SIGNATURE
                             });
-                            if (fid) functionCallIds.push(fid);
+                            functionCallIds.push(fid);
                         } else if (item.type === 'image_url' && item.image_url) {
                             const imageUrl = typeof item.image_url === 'string'
                                 ? item.image_url
@@ -916,7 +957,8 @@ export class OpenAIConverter extends BaseConverter {
                 if (message.tool_calls && Array.isArray(message.tool_calls)) {
                     for (const tc of message.tool_calls) {
                         if (tc.type !== 'function') continue;
-                        const fid = tc.id || '';
+                        // [FIX] 当 id 缺失时自动生成，确保 Antigravity 转 Claude 时 tool_use.id 不为空
+                        const fid = sanitizeToolId(tc.id) || `call_${uuidv4().replace(/-/g, '')}`;
                         const fname = tc.function?.name || '';
                         const fargs = tc.function?.arguments || '{}';
 
@@ -930,14 +972,13 @@ export class OpenAIConverter extends BaseConverter {
                         node.parts.push({
                             functionCall: {
                                 name: fname,
-                                args: argsObj
+                                args: argsObj,
+                                id: fid
                             },
                             thoughtSignature: OpenAIConverter.GEMINI_OPENAI_THOUGHT_SIGNATURE
                         });
 
-                        if (fid) {
-                            functionCallIds.push(fid);
-                        }
+                        functionCallIds.push(fid);
                     }
                 }
 
@@ -946,10 +987,11 @@ export class OpenAIConverter extends BaseConverter {
                     processedMessages.push(node);
                 }
 
-                // 添加对应的 functionResponse（作为 user 消息）
+                // 添加对应的 functionResponse（作为 user 消息，去重）
                 if (functionCallIds.length > 0) {
                     const toolNode = { role: 'user', parts: [] };
                     for (const fid of functionCallIds) {
+                        if (emittedToolResultIds.has(fid)) continue; // [FIX] 去重
                         const name = tcID2Name[fid];
                         if (name) {
                             let resp = toolResponses[fid] || '{}';
@@ -959,11 +1001,13 @@ export class OpenAIConverter extends BaseConverter {
                             toolNode.parts.push({
                                 functionResponse: {
                                     name: name,
+                                    id: fid,
                                     response: {
                                         result: resp
                                     }
                                 }
                             });
+                            emittedToolResultIds.add(fid);
                         }
                     }
                     if (toolNode.parts.length > 0) {
@@ -973,13 +1017,13 @@ export class OpenAIConverter extends BaseConverter {
             } else if (role === 'tool') {
                 // 处理独立的 tool role 消息（OpenAI 格式）
                 // 转换为 Gemini 的 functionResponse 格式
-                const toolNode = { role: 'user', parts: [] };
-                
-                // 从 tool_call_id 查找对应的函数名
-                const toolCallId = message.tool_call_id;
-                const functionName = tcID2Name[toolCallId];
-                
-                if (functionName) {
+                // [FIX] 去重：跳过已由 assistant 自动配对生成的 functionResponse
+                const toolCallId = sanitizeToolId(message.tool_call_id) || `tool_result_${uuidv4().replace(/-/g, '')}`;
+                if (!emittedToolResultIds.has(toolCallId)) {
+                    emittedToolResultIds.add(toolCallId);
+                    const toolNode = { role: 'user', parts: [] };
+                    const functionName = tcID2Name[toolCallId] || toolCallId;
+                    
                     let responseContent = message.content;
                     if (typeof responseContent !== 'string') {
                         responseContent = JSON.stringify(responseContent);
@@ -988,6 +1032,7 @@ export class OpenAIConverter extends BaseConverter {
                     toolNode.parts.push({
                         functionResponse: {
                             name: functionName,
+                            id: toolCallId,
                             response: {
                                 result: responseContent
                             }

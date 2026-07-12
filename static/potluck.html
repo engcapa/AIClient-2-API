@@ -1184,7 +1184,7 @@
                             <div class="label">今日/限额</div>
                             <div class="value ${valueClass}">${key.todayUsage}/${key.dailyLimit}</div>
                             <div class="value muted">${formatTokenCompact(key.todayTotalTokens || 0)} Tokens ${key.todayCachedTokens ? `(含 ${formatTokenCompact(key.todayCachedTokens)} 缓存)` : ''}</div>
-                            <div class="progress-bar"><div class="fill ${progressClass}" style="width:${Math.min(usagePercent, 100)}%"></div></div>
+                            <div class="progress-bar"><div class="fill ${progressClass}" style="width:${usagePercent}%"></div></div>
                         </div>
                         <div class="key-stat">
                             <div class="label">累计数据</div>

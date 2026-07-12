@@ -780,6 +780,9 @@ export class GeminiApiService {
         
         let baseModel = model;
         if (!GEMINI_MODELS.includes(model)) {
+            if (this.config.MODEL_FALLBACK_ENABLED === false) {
+                throw new Error(`[Gemini] 模型不存在: ${model}`);
+            }
             logger.warn(`[Gemini] Model '${model}' not found. Using default model: '${GEMINI_MODELS[0]}'`);
             baseModel = GEMINI_MODELS[0];
             // 同步更新请求体中的模型名称，以便调用方知晓实际使用的模型
@@ -834,6 +837,9 @@ export class GeminiApiService {
 
         let baseModel = model;
         if (!GEMINI_MODELS.includes(model)) {
+            if (this.config.MODEL_FALLBACK_ENABLED === false) {
+                throw new Error(`[Gemini] 模型不存在: ${model}`);
+            }
             logger.warn(`[Gemini] Model '${model}' not found. Using default model: '${GEMINI_MODELS[0]}'`);
             baseModel = GEMINI_MODELS[0];
             // 同步更新请求体中的模型名称，以便调用方知晓实际使用的模型

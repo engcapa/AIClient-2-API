@@ -12,6 +12,9 @@ import { getProviderModels } from '../provider-models.js';
 
 const XAI_DEFAULT_BASE_URL = 'https://api.x.ai/v1';
 const XAI_DEFAULT_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth/token';
+const GROK_CLI_DEFAULT_BILLING_URL = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits';
+const GROK_CLI_DEFAULT_SUBSCRIPTIONS_URL = 'https://grok.com/rest/subscriptions';
+const GROK_CLI_CLIENT_VERSION = '0.2.87';
 const XAI_REDIRECT_URI = 'http://127.0.0.1:56121/callback';
 const GROK_CLI_DEFAULT_MODEL = 'grok-3-mini';
 const GROK_CLI_MODELS = getProviderModels(MODEL_PROVIDER.GROK_CLI || 'grok-cli-oauth');
@@ -40,6 +43,13 @@ const XAI_VIDEOS_MAX_REFERENCES = 7;
 const XAI_VIDEO_POLL_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const XAI_VIDEO_POLL_DEFAULT_INTERVAL_MS = 5000;
 const XAI_DEFAULT_BUILTIN_TOOLS = ['web_search', 'x_search', 'code_interpreter', 'collections_search', 'attachment_search'];
+const XAI_BUILTIN_TOOL_NAME_ALIASES = new Map([
+    ['web_search_preview', 'web_search'],
+    ['web_search_preview_2025_03_11', 'web_search'],
+    ['code_execution', 'code_interpreter'],
+    ['file_search', 'file_search'],
+    ...XAI_DEFAULT_BUILTIN_TOOLS.map(name => [name, name])
+]);
 const XAI_SUPPORTED_TOOL_TYPES = new Set([
     'function',
     'web_search',
@@ -65,6 +75,110 @@ function parseExpiry(value) {
         return new Date(numeric < 10000000000 ? numeric * 1000 : numeric);
     }
     return null;
+}
+
+function moneyValue(value) {
+    if (value == null) return undefined;
+    if (typeof value === 'number') return value;
+    return value.val;
+}
+
+function percentValue(value) {
+    if (value == null) return undefined;
+    return Math.round(value * 100) / 100;
+}
+
+function formatPtReset(iso) {
+    if (!iso) return undefined;
+
+    // Grok CLI TUI uses a fixed UTC-8 "PT" label here, not daylight-adjusted PDT.
+    const utcMs = new Date(iso).getTime();
+    if (Number.isNaN(utcMs)) return undefined;
+
+    const fixedPt = new Date(utcMs - 8 * 60 * 60 * 1000);
+    const month = fixedPt.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' });
+    const day = fixedPt.toLocaleString('en-US', { day: 'numeric', timeZone: 'UTC' });
+    const hour = fixedPt.toLocaleString('en-US', { hour: '2-digit', hour12: false, timeZone: 'UTC' });
+    const minute = fixedPt.toLocaleString('en-US', { minute: '2-digit', timeZone: 'UTC' });
+
+    return `${month} ${day}, ${hour}:${minute} PT`;
+}
+
+function normalizeSubscriptionTier(tier) {
+    switch (tier) {
+        case 'SUBSCRIPTION_TIER_X_PREMIUM_PLUS':
+            return 'X Premium+';
+        case 'SUBSCRIPTION_TIER_X_PREMIUM':
+            return 'X Premium';
+        case 'SUBSCRIPTION_TIER_SUPERGROK':
+            return 'SuperGrok';
+        case 'SUBSCRIPTION_TIER_SUPERGROK_HEAVY':
+            return 'SuperGrok Heavy';
+        default:
+            return tier;
+    }
+}
+
+function isActiveSubscription(status) {
+    return status === 'SUBSCRIPTION_STATUS_ACTIVE' || status === 'SubscriptionStatusActive';
+}
+
+function tierContains(tier, needle) {
+    return String(tier || '').replace(/_/g, '').toLowerCase().includes(needle.toLowerCase());
+}
+
+function resolveGrokAccountTier(subscriptions) {
+    const active = Array.isArray(subscriptions?.subscriptions)
+        ? subscriptions.subscriptions.filter(item => isActiveSubscription(item.status))
+        : [];
+
+    const hasMax =
+        active.some(item => item.enterprise || item.eapi || item.braintree) ||
+        active.some(item => tierContains(item.tier, 'SuperGrokPro') || tierContains(item.tier, 'SuperGrokHeavy'));
+    if (hasMax) return 'SuperGrok Heavy';
+
+    const hasSuperGrok =
+        active.some(item => tierContains(item.tier, 'GrokPro')) ||
+        active.some(item => tierContains(item.tier, 'XPremiumPlus'));
+    if (hasSuperGrok) return 'SuperGrok';
+
+    const hasLite = active.some(item => tierContains(item.tier, 'SuperGrokLite'));
+    if (hasLite) return 'SuperGrok Lite';
+
+    return active.length > 0 ? 'Free' : undefined;
+}
+
+function summarizeBillingUsage(data = {}, subscriptions = undefined) {
+    const config = data.config || data || {};
+    const currentPeriod = config.currentPeriod || {};
+    const periodEnd = currentPeriod.end || config.billingPeriodEnd;
+    const activeSubscription = subscriptions?.subscriptions?.find(item => isActiveSubscription(item.status)) || subscriptions?.subscriptions?.[0];
+    const rawSubscriptionTier = config.subscription_tier || activeSubscription?.tier;
+    const grokAccountTier = resolveGrokAccountTier(subscriptions);
+    const subscriptionTier = grokAccountTier || normalizeSubscriptionTier(rawSubscriptionTier);
+
+    return {
+        periodType: currentPeriod.type,
+        periodStart: currentPeriod.start || config.billingPeriodStart,
+        periodEnd,
+        nextResetPt: formatPtReset(periodEnd),
+        weeklyLimitPercent: percentValue(config.creditUsagePercent),
+        onDemandUsed: moneyValue(config.onDemandUsed),
+        onDemandCap: moneyValue(config.onDemandCap),
+        prepaidBalance: moneyValue(config.prepaidBalance),
+        topUpMethod: config.topUpMethod,
+        grokAccountTier,
+        rawSubscriptionTier,
+        subscriptionTier,
+        subscriptionStatus: activeSubscription?.status,
+        unifiedBillingUser: config.isUnifiedBillingUser,
+        products: Array.isArray(config.productUsage)
+            ? config.productUsage.map(item => ({
+                product: item.product,
+                usagePercent: percentValue(item.usagePercent)
+            }))
+            : []
+    };
 }
 
 function sanitizeCredentialFilenamePart(value) {
@@ -542,14 +656,23 @@ function normalizeGrokCliToolChoice(toolChoice) {
 
 function buildGrokCliTools(config = {}, requestBody = {}, model = '') {
     const toolsByType = new Map();
+    const toolNames = new Set();
     const addTool = tool => {
         const normalized = normalizeGrokCliTool(tool);
         if (!normalized) return;
         const key = normalized.type === 'function'
             ? `function:${normalized.name || normalized.function?.name || crypto.randomUUID()}`
             : normalized.type;
+        const toolName = normalized.type === 'function'
+            ? String(normalized.name || normalized.function?.name || '').trim()
+            : XAI_BUILTIN_TOOL_NAME_ALIASES.get(normalized.type) || normalized.type;
+        if (toolName && toolNames.has(toolName)) {
+            logger.warn(`[Grok CLI] Dropping duplicate tool name '${toolName}' to avoid xAI 400 Duplicate tool names error.`);
+            return;
+        }
         if (!toolsByType.has(key)) {
             toolsByType.set(key, normalized);
+            if (toolName) toolNames.add(toolName);
         }
     };
 
@@ -1100,6 +1223,8 @@ export class GrokCliApiService {
         this.tokenType = 'Bearer';
         this.email = null;
         this.subject = null;
+        this.userId = null;
+        this.teamId = null;
         this.expiresAt = null;
         this.last_refresh = null;
         this.tokenEndpoint = config.GROK_CLI_TOKEN_ENDPOINT || XAI_DEFAULT_TOKEN_ENDPOINT;
@@ -1107,6 +1232,9 @@ export class GrokCliApiService {
         this.uuid = config.uuid;
         this.isInitialized = false;
         this.accessTokenOnlyRefreshLogged = false;
+        this.subscriptionsCache = null;
+        this.subscriptionsSyncedAt = 0;
+        this.loggedGrokAccountTier = null;
     }
 
     _applySidecar(axiosConfig) {
@@ -1164,6 +1292,8 @@ export class GrokCliApiService {
             this.tokenType = creds.token_type || this.tokenType || 'Bearer';
             this.email = creds.email;
             this.subject = creds.sub || creds.subject;
+            this.userId = creds.user_id || creds.userId || this.userId;
+            this.teamId = creds.team_id || creds.teamId || this.teamId;
             this.last_refresh = creds.last_refresh || this.last_refresh;
             this.tokenEndpoint = creds.token_endpoint || this.tokenEndpoint || XAI_DEFAULT_TOKEN_ENDPOINT;
             this.baseUrl = normalizeBaseUrl(this.config.GROK_CLI_BASE_URL || creds.base_url || this.baseUrl);
@@ -1492,6 +1622,9 @@ export class GrokCliApiService {
         const defaultModel = GROK_CLI_MODELS.includes(GROK_CLI_DEFAULT_MODEL)
             ? GROK_CLI_DEFAULT_MODEL
             : (GROK_CLI_MODELS[0] || GROK_CLI_DEFAULT_MODEL);
+        if (this.config.MODEL_FALLBACK_ENABLED === false) {
+            throw new Error(`[Grok CLI] 模型不存在: ${rawModel}`);
+        }
         logger.warn(`[Grok CLI] Model '${rawModel}' not found in supported list. Falling back to default: '${defaultModel}'`);
         return defaultModel;
     }
@@ -1772,6 +1905,23 @@ export class GrokCliApiService {
             'accept': 'application/json',
             'Connection': 'Keep-Alive'
         };
+    }
+
+    buildSubscriptionHeaders() {
+        const headers = {
+            'authorization': `${this.tokenType || 'Bearer'} ${this.accessToken}`,
+            'x-xai-token-auth': 'xai-grok-cli',
+            'x-grok-client-version': this.config.GROK_CLI_CLIENT_VERSION || GROK_CLI_CLIENT_VERSION,
+            'accept': 'application/json,text/plain,*/*',
+            'user-agent': `grok-cli/${this.config.GROK_CLI_CLIENT_VERSION || GROK_CLI_CLIENT_VERSION}`,
+            'Connection': 'Keep-Alive'
+        };
+
+        if (this.userId) {
+            headers['x-userid'] = this.userId;
+        }
+
+        return headers;
     }
 
     buildImageHeaders() {
@@ -2186,6 +2336,8 @@ export class GrokCliApiService {
             this.tokenType = newTokens.token_type || this.tokenType || 'Bearer';
             this.email = newTokens.email || this.email;
             this.subject = newTokens.sub || this.subject;
+            this.userId = newTokens.user_id || newTokens.userId || this.userId;
+            this.teamId = newTokens.team_id || newTokens.teamId || this.teamId;
             this.last_refresh = new Date().toISOString();
             this.tokenEndpoint = newTokens.token_endpoint || this.tokenEndpoint;
             this.baseUrl = normalizeBaseUrl(newTokens.base_url || this.baseUrl);
@@ -2253,6 +2405,8 @@ export class GrokCliApiService {
                     last_refresh: this.last_refresh || new Date().toISOString(),
                     email: this.email,
                     sub: this.subject,
+                    user_id: this.userId,
+                    team_id: this.teamId,
                     type: 'xai',
                     auth_kind: 'oauth',
                     expired: this.expiresAt.toISOString(),
@@ -2439,12 +2593,90 @@ export class GrokCliApiService {
     }
 
     async getUsageLimits() {
-        return {
-            provider: 'grok-cli-oauth',
-            account: this.email || this.subject || 'unknown',
-            expiresAt: this.expiresAt?.toISOString?.() || null,
-            baseUrl: this.baseUrl
-        };
+        if (!this.isInitialized) {
+            await this.initialize();
+        }
+
+        await this.initializeAuth(false);
+
+        try {
+            const url = this.config.GROK_CLI_BILLING_URL || GROK_CLI_DEFAULT_BILLING_URL;
+            const axiosRequestConfig = {
+                method: 'get',
+                url,
+                headers: {
+                    ...this.buildJsonHeaders(),
+                    'x-grok-cli-version': this.config.GROK_CLI_CLIENT_VERSION || GROK_CLI_CLIENT_VERSION
+                },
+                timeout: 30000
+            };
+            this._applySidecar(axiosRequestConfig);
+
+            const response = await axios.request(axiosRequestConfig);
+            const subscriptions = await this.getSubscriptionsForUsage(response.data);
+            const summary = summarizeBillingUsage(response.data, subscriptions);
+            this.logGrokAccountTier(summary);
+
+            return {
+                ...response.data,
+                summary,
+                provider: 'grok-cli-oauth',
+                account: this.email || this.subject || 'unknown',
+                expiresAt: this.expiresAt?.toISOString?.() || null,
+                baseUrl: this.baseUrl
+            };
+        } catch (error) {
+            await this.handleRequestError(error, 'usage query');
+        }
+    }
+
+    logGrokAccountTier(summary = {}) {
+        const tier = summary.grokAccountTier || summary.subscriptionTier || 'unknown';
+        const rawTier = summary.rawSubscriptionTier || 'unknown';
+        const status = summary.subscriptionStatus || 'unknown';
+        const logKey = `${tier}|${rawTier}|${status}`;
+
+        if (this.loggedGrokAccountTier === logKey) return;
+        this.loggedGrokAccountTier = logKey;
+        logger.info(`[Grok CLI] Account tier resolved: ${tier} (raw: ${rawTier}, status: ${status})`);
+    }
+
+    async getSubscriptionsForUsage(billingData = undefined, forceRefresh = false) {
+        const embeddedSubscriptions = billingData?.subscriptions || billingData?.config?.subscriptions;
+        if (Array.isArray(embeddedSubscriptions)) {
+            this.subscriptionsCache = { subscriptions: embeddedSubscriptions };
+            this.subscriptionsSyncedAt = Date.now();
+            return this.subscriptionsCache;
+        }
+
+        if (!forceRefresh && this.subscriptionsCache) {
+            return this.subscriptionsCache;
+        }
+
+        const url = this.config.GROK_CLI_SUBSCRIPTIONS_URL || GROK_CLI_DEFAULT_SUBSCRIPTIONS_URL;
+        if (!url) {
+            return this.subscriptionsCache;
+        }
+
+        try {
+            const axiosRequestConfig = {
+                method: 'get',
+                url,
+                headers: this.buildSubscriptionHeaders(),
+                timeout: 30000
+            };
+            this._applySidecar(axiosRequestConfig);
+
+            const response = await axios.request(axiosRequestConfig);
+            if (Array.isArray(response.data?.subscriptions)) {
+                this.subscriptionsCache = response.data;
+                this.subscriptionsSyncedAt = Date.now();
+            }
+        } catch (error) {
+            logger.debug?.(`[Grok CLI] Subscription tier lookup skipped: ${error.message}`);
+        }
+
+        return this.subscriptionsCache;
     }
 
     startCacheCleanup() {

@@ -1389,6 +1389,29 @@
     transform: translateY(-1px);
 }
 
+.provider-register-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.75rem;
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: none;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.provider-register-btn:hover {
+    background: #2563eb;
+    color: white;
+    transform: translateY(-1px);
+    text-decoration: none;
+}
+
 /* 添加分组按钮样式 */
 .add-group-btn {
     display: inline-flex;

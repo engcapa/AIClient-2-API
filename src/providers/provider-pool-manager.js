@@ -48,19 +48,21 @@ export class ProviderPoolManager {
     // 默认健康检查模型配置
     // 键名必须与 MODEL_PROVIDER 常量值一致
     static DEFAULT_HEALTH_CHECK_MODELS = {
-        'gemini-cli-oauth': 'gemini-2.5-flash',
-        'gemini-antigravity': 'gemini-2.5-flash',
-        'openai-custom': 'gpt-4o-mini',
-        'atlascloud': 'gpt-4o-mini',
-        'claude-custom': 'claude-3-7-sonnet-20250219',
-        'claude-kiro-oauth': 'claude-haiku-4-5',
-        'openai-qwen-oauth': 'qwen3-coder-flash',
-        'openai-iflow': 'qwen3-coder-plus',
-        'openai-codex-oauth': 'gpt-5-codex-mini',
-        'openaiResponses-custom': 'gpt-4o-mini',
-        'forward-api': 'gpt-4o-mini',
-        'grok-cli-oauth': 'grok-3-mini',
-        'grok-web': 'grok-4.1-mini',
+        'gemini-cli-oauth': 'gemini-3-flash-preview',
+        'gemini-antigravity': 'gemini-3-flash',
+        'claude-custom': 'claude-sonnet-4-5',
+        'claude-kiro-oauth': 'claude-sonnet-4-5',
+        'openai-custom': 'gpt-5.5',
+        'atlascloud': 'gpt-5.5',
+        'qiniu': 'gpt-5.5',
+        'fenno': 'gpt-5.5',
+        'openai-qwen-oauth': 'qwen3-coder-plus',
+        'openai-iflow': 'qwen3-max',
+        'openai-codex-oauth': 'gpt-5',
+        'openaiResponses-custom': 'gpt-5.5',
+        'grok-web': 'grok-4.3',
+        'grok-cli-oauth': 'grok-4.3',
+        'forward-api': 'gpt-5.5'
     };
 
     constructor(providerPools, options = {}) {

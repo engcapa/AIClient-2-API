@@ -436,6 +436,7 @@ async function pollKiroBuilderIDToken(clientId, clientSecret, deviceCode, interv
                     authMethod: 'builder-id',
                     clientId,
                     clientSecret,
+                    region: options.region || 'us-east-1',
                     idcRegion: options.region || 'us-east-1'
                 };
                 
