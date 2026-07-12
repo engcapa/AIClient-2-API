@@ -17,7 +17,7 @@ import {
     getContentText as getContentTextUtil
 } from '../../utils/token-utils.js';
 import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
-import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getNormalizedErrorResponseText, buildHttpErrorReason, normalizeProviderErrorMessage } from '../../utils/common.js';
+import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getNormalizedErrorResponseText, buildHttpErrorReason, normalizeProviderErrorMessage, createEmptyUpstreamResponseError } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 
 const KIRO_THINKING = {
@@ -62,6 +62,50 @@ function shortenKiroToolName(name) {
     const hash = crypto.createHash('sha256').update(rawName).digest('hex').slice(0, 12);
     const prefixLength = KIRO_MAX_TOOL_NAME_LENGTH - hash.length - 1;
     return `${rawName.slice(0, prefixLength)}_${hash}`;
+}
+
+// Kiro/CodeWhisperer 的 generateAssistantResponse 在 tools 列表为空时会报 API 错误，
+// 因此客户端没有提供任何可用工具时，注入这个占位工具来满足 API 要求。
+// 描述里明确禁止调用它：否则模型（尤其被 agentic system prompt 引导时）会先说一句
+// "我来读取文件…" 的开场白再去调用这个空操作工具，导致本轮在没有实质内容的情况下结束。
+const KIRO_PLACEHOLDER_TOOL_NAME = 'no_tool_available';
+
+// 判断一个 Anthropic 消息是否"实质为空"：没有非空文本，也没有工具调用/工具结果/图片/思考内容。
+// 这类空轮次通常是客户端的占位或流式残留，塞进 Kiro 历史里既会撑大请求体、又可能触发 400，
+// 之前的做法是填充 "Continue"，反而污染了上下文。
+function isMeaningfulContentPart(part) {
+    if (!part || typeof part !== 'object') return false;
+    if (part.type === 'text') {
+        return typeof part.text === 'string' && part.text.trim() !== '';
+    }
+    // tool_use / tool_result / image / thinking / redacted_thinking 及其它未知类型都视为有意义，避免误删数据
+    return true;
+}
+
+function isEmptyAnthropicMessage(message) {
+    if (!message) return true;
+    const content = message.content;
+    if (content == null) return true;
+    if (typeof content === 'string') return content.trim() === '';
+    if (Array.isArray(content)) {
+        return content.length === 0 || !content.some(isMeaningfulContentPart);
+    }
+    return false;
+}
+
+function buildKiroPlaceholderTool() {
+    return {
+        toolSpecification: {
+            name: KIRO_PLACEHOLDER_TOOL_NAME,
+            description: 'Internal no-op placeholder. Never call this tool (or any tool) in this turn. Do not announce or promise actions such as reading files or running commands. Instead, write your full and complete answer directly as natural-language text in this single reply, based on the information already available to you.',
+            inputSchema: {
+                json: {
+                    type: "object",
+                    properties: {}
+                }
+            }
+        }
+    };
 }
 
 function buildKiroToolNameMaps(tools) {
@@ -154,6 +198,7 @@ function normalizeKiroToolInput(input) {
 
 // Per-model context window sizes for accurate token estimation
 const MODEL_CONTEXT_TOKENS = {
+    "claude-sonnet-5": 1000000,
     "claude-opus-4-8": 1000000,
     "claude-opus-4-7": 1000000,
     "claude-opus-4-6": 1000000,
@@ -212,6 +257,8 @@ const KIRO_MODELS = getProviderModels(MODEL_PROVIDER.KIRO_API);
 // 完整的模型映射表
 const FULL_MODEL_MAPPING = {
     "claude-haiku-4-5":"claude-haiku-4.5",
+    "claude-haiku-4-5-20251001":"claude-haiku-4.5",
+    "claude-sonnet-5":"claude-sonnet-5",
     "claude-opus-4-8":"claude-opus-4.8",
     "claude-opus-4-7":"claude-opus-4.7",
     "claude-opus-4-6":"claude-opus-4.6",
@@ -233,6 +280,22 @@ const FULL_MODEL_MAPPING = {
 const MODEL_MAPPING = Object.fromEntries(
     Object.entries(FULL_MODEL_MAPPING).filter(([key]) => KIRO_MODELS.includes(key))
 );
+
+function resolveKiroModel(model, config = {}) {
+    if (MODEL_MAPPING[model]) {
+        return MODEL_MAPPING[model];
+    }
+
+    if (findCustomModelConfigForModel(model, config)) {
+        return model;
+    }
+
+    if (config.MODEL_FALLBACK_ENABLED === false) {
+        throw new Error(`[Kiro] 模型不存在: ${model}`);
+    }
+
+    return model;
+}
 
 const KIRO_AUTH_TOKEN_FILE = "kiro-auth-token.json";
 
@@ -556,6 +619,16 @@ function deduplicateToolCalls(toolCalls) {
     return uniqueToolCalls;
 }
 
+/**
+ * Kiro 上游返回了 HTTP 200 但内容完全为空（无文本、无工具调用、无思考内容）时使用的错误。
+ * 复用 common.js 中通用的 createEmptyUpstreamResponseError（error.isEmptyUpstreamResponse），
+ * 以便与 handleStreamRequest / handleUnaryRequest 里 provider 无关的空响应重试分支对接。
+ * 标记为可切换凭证重试，且不计入凭证错误次数（这不是凭证本身的问题，可能是历史/会话导致 Kiro 静默无输出）。
+ */
+function createKiroEmptyResponseError() {
+    return createEmptyUpstreamResponseError('Kiro');
+}
+
 export class KiroApiService {
     constructor(config = {}) {
         this.isInitialized = false;
@@ -736,8 +809,8 @@ async loadCredentials() {
         applyCredential('idcRegion');
 
         if (!this.region) {
-            logger.warn('[Kiro Auth] Region not found in credentials. Using default region us-east-1 for URLs.');
-            this.region = 'us-east-1';
+            this.region = this.idcRegion || 'us-east-1';
+            logger.warn(`[Kiro Auth] Region not found in credentials. Using idcRegion/default: ${this.region}`);
         }
 
         // idcRegion 用于 REFRESH_IDC_URL，如果未设置则使用 region
@@ -1127,6 +1200,18 @@ async saveCredentialsToFile(filePath, newData) {
             }
         }
 
+        // 移除实质为空的历史轮次（空文本、无工具调用/结果/图片/思考）。这些空轮次以前会被填成
+        // "Continue" 污染上下文并撑大请求体。在合并前移除后，相邻同 role 消息会被下面的合并步骤归并，
+        // 因此不会破坏 Kiro 要求的 user/assistant 交替。若过滤后为空则保留原数组，交由后续兜底逻辑处理。
+        if (processedMessages.length > 1) {
+            const nonEmptyMessages = processedMessages.filter(m => !isEmptyAnthropicMessage(m));
+            if (nonEmptyMessages.length > 0 && nonEmptyMessages.length < processedMessages.length) {
+                logger.info(`[Kiro] Removed ${processedMessages.length - nonEmptyMessages.length} empty message turn(s) before building history`);
+                processedMessages.length = 0;
+                processedMessages.push(...nonEmptyMessages);
+            }
+        }
+
         // 合并相邻相同 role 的消息
         const mergedMessages = [];
         for (let i = 0; i < processedMessages.length; i++) {
@@ -1164,7 +1249,7 @@ async saveCredentialsToFile(filePath, newData) {
         processedMessages.length = 0;
         processedMessages.push(...mergedMessages);
 
-        const codewhispererModel = MODEL_MAPPING[model] || model;
+        const codewhispererModel = resolveKiroModel(model, this.config);
         const toolNameMaps = buildKiroToolNameMaps(tools);
         
         // 动态压缩 tools（保留全部工具，但过滤掉 web_search/websearch）
@@ -1183,19 +1268,7 @@ async saveCredentialsToFile(filePath, newData) {
             if (filteredTools.length === 0) {
                 // 所有工具都被过滤掉了，添加一个占位工具
                 logger.info('[Kiro] All tools were filtered out, adding placeholder tool');
-                const placeholderTool = {
-                    toolSpecification: {
-                        name: "no_tool_available",
-                        description: "This is a placeholder tool when no other tools are available. It does nothing.",
-                        inputSchema: {
-                            json: {
-                                type: "object",
-                                properties: {}
-                            }
-                        }
-                    }
-                };
-                toolsContext = { tools: [placeholderTool] };
+                toolsContext = { tools: [buildKiroPlaceholderTool()] };
             } else {
                 const MAX_DESCRIPTION_LENGTH = 11024;
 
@@ -1237,19 +1310,7 @@ async saveCredentialsToFile(filePath, newData) {
                 // 检查过滤后是否还有有效工具
                 if (kiroTools.length === 0) {
                     logger.info('[Kiro] All tools were filtered out (empty descriptions), adding placeholder tool');
-                    const placeholderTool = {
-                        toolSpecification: {
-                            name: "no_tool_available",
-                            description: "This is a placeholder tool when no other tools are available. It does nothing.",
-                            inputSchema: {
-                                json: {
-                                    type: "object",
-                                    properties: {}
-                                }
-                            }
-                        }
-                    };
-                    toolsContext = { tools: [placeholderTool] };
+                    toolsContext = { tools: [buildKiroPlaceholderTool()] };
                 } else {
                     toolsContext = { tools: kiroTools };
                 }
@@ -1257,19 +1318,7 @@ async saveCredentialsToFile(filePath, newData) {
         } else {
             // tools 为空或长度为 0 时，自动添加一个占位工具
             logger.info('[Kiro] No tools provided, adding placeholder tool');
-            const placeholderTool = {
-                toolSpecification: {
-                    name: "no_tool_available",
-                    description: "This is a placeholder tool when no other tools are available. It does nothing.",
-                    inputSchema: {
-                        json: {
-                            type: "object",
-                            properties: {}
-                        }
-                    }
-                }
-            };
-            toolsContext = { tools: [placeholderTool] };
+            toolsContext = { tools: [buildKiroPlaceholderTool()] };
         }
 
         const history = [];
@@ -1390,7 +1439,19 @@ async saveCredentialsToFile(filePath, newData) {
                     }
                     userInputMessage.userInputMessageContext = { toolResults: uniqueToolResults };
                 }
-                
+
+                // 兜底处理空 content（正常情况下空轮次已在合并前被过滤掉）：
+                // 有工具结果/图片时 Kiro 仍要求 content 非空，填入最小必要说明；否则整条跳过，不污染上下文。
+                if (!userInputMessage.content || userInputMessage.content.trim() === '') {
+                    if (toolResults.length > 0) {
+                        userInputMessage.content = 'Tool results provided.';
+                    } else if (userInputMessage.images && userInputMessage.images.length > 0) {
+                        userInputMessage.content = 'Image provided.';
+                    } else {
+                        continue;
+                    }
+                }
+
                 history.push({ userInputMessage });
             } else if (message.role === 'assistant') {
                 let assistantResponseMessage = {
@@ -1426,6 +1487,12 @@ async saveCredentialsToFile(filePath, newData) {
                 // 只添加非空字段
                 if (toolUses.length > 0) {
                     assistantResponseMessage.toolUses = toolUses;
+                }
+
+                // 兜底处理空 content（正常情况下空轮次已在合并前被过滤掉）：
+                // 只有工具调用时保留（content 允许为空），完全空的助手轮次则跳过，不用 "Continue" 污染。
+                if ((!assistantResponseMessage.content || assistantResponseMessage.content.trim() === '') && toolUses.length === 0) {
+                    continue;
                 }
 
                 history.push({ assistantResponseMessage });
@@ -1624,6 +1691,8 @@ async saveCredentialsToFile(filePath, newData) {
         let fullContent = '';
         const toolCalls = [];
         let currentToolCallDict = null;
+        // 记录被忽略的占位工具调用 id（详见 KIRO_PLACEHOLDER_TOOL_NAME 说明）
+        const ignoredToolUseIds = new Set();
         // logger.info(`rawStr=${rawStr}`);
 
         // 改进的 SSE 事件解析：匹配 :message-typeevent 后面的 JSON 数据
@@ -1654,28 +1723,36 @@ async saveCredentialsToFile(filePath, newData) {
 
                     // 优先处理结构化工具调用事件
                     if (eventData.name && eventData.toolUseId) {
-                        if (!currentToolCallDict) {
-                            currentToolCallDict = {
-                                id: eventData.toolUseId,
-                                type: "function",
-                                function: {
-                                    name: toolNameMaps?.fromKiroName ? toolNameMaps.fromKiroName(eventData.name) : eventData.name,
-                                    arguments: ""
-                                }
-                            };
-                        }
-                        if (eventData.input) {
-                            currentToolCallDict.function.arguments += normalizeKiroToolInput(eventData.input);
-                        }
-                        if (eventData.stop) {
-                            try {
-                                const args = JSON.parse(currentToolCallDict.function.arguments);
-                                currentToolCallDict.function.arguments = JSON.stringify(args);
-                            } catch (e) {
-                                logger.warn(`[Kiro] Tool call arguments not valid JSON: ${currentToolCallDict.function.arguments}`);
+                        if (eventData.name === KIRO_PLACEHOLDER_TOOL_NAME || ignoredToolUseIds.has(eventData.toolUseId)) {
+                            // 占位工具调用：丢弃，不生成真实 tool_use
+                            if (!ignoredToolUseIds.has(eventData.toolUseId)) {
+                                logger.warn(`[Kiro] Model attempted to call placeholder tool '${KIRO_PLACEHOLDER_TOOL_NAME}'; dropping it (no real tools were available for this request).`);
+                                ignoredToolUseIds.add(eventData.toolUseId);
                             }
-                            toolCalls.push(currentToolCallDict);
-                            currentToolCallDict = null;
+                        } else {
+                            if (!currentToolCallDict) {
+                                currentToolCallDict = {
+                                    id: eventData.toolUseId,
+                                    type: "function",
+                                    function: {
+                                        name: toolNameMaps?.fromKiroName ? toolNameMaps.fromKiroName(eventData.name) : eventData.name,
+                                        arguments: ""
+                                    }
+                                };
+                            }
+                            if (eventData.input) {
+                                currentToolCallDict.function.arguments += normalizeKiroToolInput(eventData.input);
+                            }
+                            if (eventData.stop) {
+                                try {
+                                    const args = JSON.parse(currentToolCallDict.function.arguments);
+                                    currentToolCallDict.function.arguments = JSON.stringify(args);
+                                } catch (e) {
+                                    logger.warn(`[Kiro] Tool call arguments not valid JSON: ${currentToolCallDict.function.arguments}`);
+                                }
+                                toolCalls.push(currentToolCallDict);
+                                currentToolCallDict = null;
+                            }
                         }
                     } else if (!eventData.followupPrompt && eventData.content) {
                         // 处理内容，保留原始转义序列以便后续解析工具调用
@@ -2095,6 +2172,15 @@ async saveCredentialsToFile(filePath, newData) {
             allToolCalls.push(...restoreKiroToolCallNames(rawBracketToolCalls, toolNameMaps));
         }
 
+        // 2.5. 兜底过滤：占位工具 no_tool_available 理论上只会走结构化事件分支（已在
+        // parseEventStreamChunk 中忽略），这里再兜底一次，防止它以 bracket 文本格式
+        // ("[Called no_tool_available with args: {}]") 漏网被当作真实工具调用转发出去。
+        const beforePlaceholderFilter = allToolCalls.length;
+        allToolCalls = allToolCalls.filter(tc => tc?.function?.name !== KIRO_PLACEHOLDER_TOOL_NAME);
+        if (allToolCalls.length !== beforePlaceholderFilter) {
+            logger.warn(`[Kiro] Dropped placeholder tool '${KIRO_PLACEHOLDER_TOOL_NAME}' call(s) from non-stream response (no real tools were available for this request).`);
+        }
+
         // 3. Deduplicate all collected tool calls
         const uniqueToolCalls = deduplicateToolCalls(allToolCalls);
         //logger.info(`[Kiro] Total unique tool calls after deduplication: ${uniqueToolCalls.length}`);
@@ -2138,7 +2224,7 @@ async saveCredentialsToFile(filePath, newData) {
             this._markCredentialNeedRefresh('Token near expiry in generateContent');
         }
         
-        const finalModel = MODEL_MAPPING[model] ? model : model;
+        const finalModel = resolveKiroModel(model, this.config);
         logger.info(`[Kiro] Calling generateContent with model: ${finalModel}`);
         
         // Estimate input tokens before making the API call
@@ -2148,6 +2234,12 @@ async saveCredentialsToFile(filePath, newData) {
 
         try {
             const { responseText, toolCalls } = this._processApiResponse(response);
+
+            if (responseText === '' && toolCalls.length === 0) {
+                logger.warn('[Kiro] Empty response detected in generateContent (no text/tool calls received from upstream); signalling for retry.');
+                throw createKiroEmptyResponseError();
+            }
+
             const thinkingType = requestBody?.thinking?.type;
             const thinkingRequested = typeof thinkingType === 'string' &&
                 (thinkingType.toLowerCase() === 'enabled' || thinkingType.toLowerCase() === 'adaptive');
@@ -2457,6 +2549,9 @@ async saveCredentialsToFile(filePath, newData) {
                 return;
             }
 
+            if (error.response && error.response.data) {
+                logger.error('[Kiro] Stream error response body:', typeof error.response.data === 'string' ? error.response.data.substring(0, 500) : JSON.stringify(error.response.data).substring(0, 500));
+            }
             logger.error(`[Kiro] Stream API call failed (Status: ${status}, Code: ${errorCode}):`,  error.message);
             throw error;
         } finally {
@@ -2478,8 +2573,13 @@ async saveCredentialsToFile(filePath, newData) {
         }
     }
 
-    // 真正的流式传输实现
-    async * generateContentStream(model, requestBody) {
+    // 真正的流式传输实现（内部原始生成器：立即产出 message_start，随后产出实时事件）
+    //
+    // 注意：这个方法本身不对外暴露——对外的 generateContentStream 是下面的薄包装，
+    // 它会缓存这里第一次产出的 message_start，直到确认收到过至少一个有意义的事件
+    // （文本/工具调用/思考）才真正转发给调用方。这样即使这里在流结束前检测到
+    // 完全空的响应并抛错，调用方也从未收到过任何数据，可以安全地整体重试。
+    async * _generateContentStreamRaw(model, requestBody) {
         if (!this.isInitialized) await this.initialize();
 
         // 临时存储 monitorRequestId
@@ -2497,7 +2597,7 @@ async saveCredentialsToFile(filePath, newData) {
             this._markCredentialNeedRefresh('Token near expiry in generateContentStream');
         }
         
-        const finalModel = MODEL_MAPPING[model] ? model : model;
+        const finalModel = resolveKiroModel(model, this.config);
         logger.info(`[Kiro] Calling generateContentStream with model: ${finalModel} (real streaming)`);
 
         let inputTokens = 0;
@@ -2600,6 +2700,8 @@ async saveCredentialsToFile(filePath, newData) {
             const toolCalls = [];
             let currentToolCall = null; // 用于累积结构化工具调用
             const toolUseBlockIndexes = new Map(); // toolUseId -> content block index
+            // 记录被忽略的占位工具调用 id（详见 KIRO_PLACEHOLDER_TOOL_NAME 说明）
+            const ignoredToolUseIds = new Set();
 
             const estimatedInputTokens = this.estimateInputTokens(requestBody);
 
@@ -2742,6 +2844,17 @@ async saveCredentialsToFile(filePath, newData) {
                     yield* pushEvents(events);
                 } else if (event.type === 'toolUse') {
                     const tc = event.toolUse;
+
+                    // 占位工具 no_tool_available 被"调用"：整条丢弃，不生成任何 tool_use 内容块，
+                    // 也不计入 totalContent，避免把这个空操作工具调用转发给客户端导致本轮无实质输出。
+                    if (tc.name === KIRO_PLACEHOLDER_TOOL_NAME || (tc.toolUseId && ignoredToolUseIds.has(tc.toolUseId))) {
+                        if (tc.toolUseId && !ignoredToolUseIds.has(tc.toolUseId)) {
+                            logger.warn(`[Kiro] Model attempted to call placeholder tool '${KIRO_PLACEHOLDER_TOOL_NAME}'; dropping it (no real tools were available for this request).`);
+                            ignoredToolUseIds.add(tc.toolUseId);
+                        }
+                        continue;
+                    }
+
                     const toolEvents = [];
 
                     // 统计工具调用的内容到 totalContent（用于 token 计算）
@@ -2948,6 +3061,13 @@ async saveCredentialsToFile(filePath, newData) {
                 yield* pushEvents(createTextDeltaEvents(' '));
             }
 
+            // 真正的空响应：没有文本、没有工具调用、也没有思考内容——Kiro 上游静默地什么都没生成。
+            // 不再伪造一次成功的 end_turn，而是抛出可重试的错误，交给上层的凭证切换重试逻辑处理。
+            if (totalContent === '' && toolCalls.length === 0 && !emittedOnlyThinking) {
+                logger.warn('[Kiro Stream] Empty response detected (no content/toolUse/thinking events received from upstream); signalling for retry.');
+                throw createKiroEmptyResponseError();
+            }
+
             yield* pushEvents(stopBlock(streamState.textBlockIndex));
 
             // 检查文本内容中的 bracket 格式工具调用
@@ -3007,8 +3127,44 @@ async saveCredentialsToFile(filePath, newData) {
             yield { type: "message_stop" };
 
         } catch (error) {
-            logger.error('[Kiro] Error in streaming generation:', error);
+            if (!error.isEmptyUpstreamResponse) {
+                logger.error('[Kiro] Error in streaming generation:', error);
+            }
             throw error;
+        }
+    }
+
+    // 对外暴露的流式生成入口：包装 _generateContentStreamRaw，缓存其第一个产出的
+    // message_start 事件，直到确认后续确实产出过内容才转发出去。
+    //
+    // 效果：
+    // - 正常有内容的响应：几乎零延迟地把 message_start 和第一个真实事件一起放行，
+    //   真实流式体验不受影响。
+    // - 完全空的响应：_generateContentStreamRaw 在结束前会抛出
+    //   isEmptyUpstreamResponse 错误而不产出第二个事件；此时 message_start 从未被
+    //   转发给调用方，调用方（handleStreamRequest）尚未向客户端写入任何数据，
+    //   可以安全地整体重试（不会出现同一个 SSE 响应里出现两个 message_start）。
+    async * generateContentStream(model, requestBody) {
+        const rawGenerator = this._generateContentStreamRaw(model, requestBody);
+
+        const first = await rawGenerator.next();
+        if (first.done) {
+            return;
+        }
+
+        // first.value 预期是 message_start；先缓存，等确认有后续真实事件再一起放行。
+        const pendingMessageStart = first.value;
+        let flushedMessageStart = false;
+
+        while (true) {
+            const { value, done } = await rawGenerator.next();
+            if (done) break;
+
+            if (!flushedMessageStart) {
+                yield pendingMessageStart;
+                flushedMessageStart = true;
+            }
+            yield value;
         }
     }
 

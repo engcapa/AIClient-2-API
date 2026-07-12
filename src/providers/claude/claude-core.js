@@ -261,14 +261,27 @@ export class ClaudeApiService {
 
     /**
      * Lists available models.
-     * The Claude API does not have a direct '/models' endpoint; typically, supported models need to be hardcoded.
      * @returns {Promise<object>} List of models.
      */
     async listModels() {
         logger.info('[ClaudeApiService] Listing available models.');
-        // Claude API 没有直接的 /models 端点来列出所有模型。
-        // 通常，你需要根据 Anthropic 的文档硬编码你希望支持的模型。
-        // 这里我们返回一些常见的 Claude 模型作为示例。
+        try {
+            const axiosConfig = {
+                method: 'get',
+                url: '/models'
+            };
+            this._applySidecar(axiosConfig);
+            const response = await this.client.request(axiosConfig);
+            if (Array.isArray(response.data?.data)) {
+                return { models: response.data.data };
+            }
+            return response.data;
+        } catch (error) {
+            const status = error.response?.status;
+            const data = error.response?.data;
+            logger.warn(`[ClaudeApiService] Failed to fetch models from upstream (Status: ${status || 'N/A'}), using fallback list:`, data || error.message);
+        }
+
         const models = [
             { id: "claude-4-sonnet", name: "claude-4-sonnet" },
             { id: "claude-sonnet-4-20250514", name: "claude-sonnet-4-20250514" },

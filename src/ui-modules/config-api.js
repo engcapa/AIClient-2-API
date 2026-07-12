@@ -81,6 +81,7 @@ export async function handleGetConfig(req, res, currentConfig) {
         PROMPT_LOG_MODE: currentConfig.PROMPT_LOG_MODE,
         REQUEST_MAX_RETRIES: currentConfig.REQUEST_MAX_RETRIES,
         REQUEST_BASE_DELAY: currentConfig.REQUEST_BASE_DELAY,
+        MODEL_FALLBACK_ENABLED: currentConfig.MODEL_FALLBACK_ENABLED !== false,
         CREDENTIAL_SWITCH_MAX_RETRIES: currentConfig.CREDENTIAL_SWITCH_MAX_RETRIES,
         RATE_LIMIT_COOLDOWN_ENABLED: currentConfig.RATE_LIMIT_COOLDOWN_ENABLED,
         RATE_LIMIT_COOLDOWN_MS: currentConfig.RATE_LIMIT_COOLDOWN_MS,
@@ -193,6 +194,7 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
             if (Number.isInteger(v) && v >= 0 && v <= RETRY.MAX_RETRIES) currentConfig.REQUEST_MAX_RETRIES = v;
         }
         if (newConfig.REQUEST_BASE_DELAY !== undefined) currentConfig.REQUEST_BASE_DELAY = newConfig.REQUEST_BASE_DELAY;
+        if (newConfig.MODEL_FALLBACK_ENABLED !== undefined) currentConfig.MODEL_FALLBACK_ENABLED = parseBooleanConfig(newConfig.MODEL_FALLBACK_ENABLED);
         if (newConfig.CREDENTIAL_SWITCH_MAX_RETRIES !== undefined) currentConfig.CREDENTIAL_SWITCH_MAX_RETRIES = newConfig.CREDENTIAL_SWITCH_MAX_RETRIES;
         if (newConfig.RATE_LIMIT_COOLDOWN_ENABLED !== undefined) currentConfig.RATE_LIMIT_COOLDOWN_ENABLED = parseBooleanConfig(newConfig.RATE_LIMIT_COOLDOWN_ENABLED);
         if (newConfig.RATE_LIMIT_COOLDOWN_MS !== undefined) {

@@ -437,11 +437,14 @@ function ensureToolsArray(body) {
  * @param {string} model - 模型名称
  * @returns {Object} - 处理后的请求体
  */
-function preprocessRequestBody(body, model) {
+function preprocessRequestBody(body, model, config = {}) {
     // 确保模型名称有效，如果不存在则使用默认模型
     let targetModel = model;
     if (Array.isArray(IFLOW_MODELS) && IFLOW_MODELS.length > 0) {
         if (!IFLOW_MODELS.includes(model)) {
+            if (config.MODEL_FALLBACK_ENABLED === false) {
+                throw new Error(`[iFlow] 模型不存在: ${model}`);
+            }
             logger.warn(`[iFlow] Model "${model}" not found in IFLOW_MODELS, defaulting to "${IFLOW_MODELS[0]}"`);
             targetModel = IFLOW_MODELS[0];
         }
@@ -798,7 +801,7 @@ export class IFlowApiService {
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000;
 
         // 预处理请求体
-        const processedBody = preprocessRequestBody(body, model);
+        const processedBody = preprocessRequestBody(body, model, this.config);
 
         try {
             const response = await this.axiosInstance.post(endpoint, processedBody, {
@@ -888,7 +891,7 @@ export class IFlowApiService {
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000;
 
         // 预处理请求体并设置 stream: true
-        const processedBody = preprocessRequestBody({ ...body, stream: true }, model);
+        const processedBody = preprocessRequestBody({ ...body, stream: true }, model, this.config);
 
         try {
             const response = await this.axiosInstance.post(endpoint, processedBody, {

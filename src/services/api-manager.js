@@ -135,7 +135,7 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
             ({model, n, response_format, size, virtualOpenAIRequest} = retryContext.parsedBody);
             codexRequestBody = virtualOpenAIRequest;
         } else {
-            const body = await getRequestBody(req);
+            const body = await getRequestBody(req, { maxBytes: CONFIG.REQUEST_BODY_MAX_BYTES });
             model = body.model || 'gpt-image-2';
             response_format = body.response_format || 'b64_json';
             size = body.size;

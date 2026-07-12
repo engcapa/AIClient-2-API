@@ -482,6 +482,7 @@ async function loadConfiguration() {
         const promptLogModeEl = document.getElementById('promptLogMode');
         const requestMaxRetriesEl = document.getElementById('requestMaxRetries');
         const requestBaseDelayEl = document.getElementById('requestBaseDelay');
+        const modelFallbackEnabledEl = document.getElementById('modelFallbackEnabled');
         const cronNearMinutesEl = document.getElementById('cronNearMinutes');
         const cronRefreshTokenEl = document.getElementById('cronRefreshToken');
         const loginExpiryEl = document.getElementById('loginExpiry');
@@ -501,6 +502,7 @@ async function loadConfiguration() {
         if (promptLogModeEl) promptLogModeEl.value = data.PROMPT_LOG_MODE || 'none';
         if (requestMaxRetriesEl) requestMaxRetriesEl.value = data.REQUEST_MAX_RETRIES || 3;
         if (requestBaseDelayEl) requestBaseDelayEl.value = data.REQUEST_BASE_DELAY || 1000;
+        if (modelFallbackEnabledEl) modelFallbackEnabledEl.checked = data.MODEL_FALLBACK_ENABLED !== false;
         
         // 坏凭证切换最大重试次数
         const credentialSwitchMaxRetriesEl = document.getElementById('credentialSwitchMaxRetries');
@@ -698,6 +700,7 @@ async function saveConfiguration(options = {}) {
     config.PROMPT_LOG_MODE = document.getElementById('promptLogMode')?.value || '';
     config.REQUEST_MAX_RETRIES = parseInt(document.getElementById('requestMaxRetries')?.value || 3);
     config.REQUEST_BASE_DELAY = parseInt(document.getElementById('requestBaseDelay')?.value || 1000);
+    config.MODEL_FALLBACK_ENABLED = document.getElementById('modelFallbackEnabled')?.checked !== false;
     config.CREDENTIAL_SWITCH_MAX_RETRIES = parseInt(document.getElementById('credentialSwitchMaxRetries')?.value || 5);
     config.RATE_LIMIT_COOLDOWN_ENABLED = document.getElementById('rateLimitCooldownEnabled')?.checked || false;
     config.RATE_LIMIT_COOLDOWN_MS = parseInt(document.getElementById('rateLimitCooldownMs')?.value || 30000);

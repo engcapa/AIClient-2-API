@@ -178,6 +178,28 @@ function getAvailableRoutes() {
             badgeClass: 'official'
         },
         {
+            provider: 'qiniu',
+            name: 'Qiniu Cloud AI',
+            paths: {
+                openai: '/qiniu/v1/chat/completions',
+                claude: '/qiniu/v1/messages'
+            },
+            description: t('dashboard.routing.official'),
+            badge: t('dashboard.routing.official'),
+            badgeClass: 'official'
+        },
+        {
+            provider: 'fenno',
+            name: 'Fenno.ai',
+            paths: {
+                openai: '/fenno/v1/chat/completions',
+                claude: '/fenno/v1/messages'
+            },
+            description: t('dashboard.routing.official'),
+            badge: t('dashboard.routing.official'),
+            badgeClass: 'official'
+        },
+        {
             provider: 'gemini-cli-oauth',
             name: t('dashboard.routing.nodeName.gemini'),
             paths: {
@@ -359,6 +381,8 @@ async function copyCurlExample(provider, options = {}) {
             break;
             
         case 'atlascloud':
+        case 'qiniu':
+        case 'fenno':
         case 'openai-custom':
         case 'openai-qwen-oauth':
         case 'openai-iflow':
@@ -498,6 +522,8 @@ function renderRoutingExamples(providerConfigs) {
         'gemini-antigravity': 'fa-rocket',
         'openai-custom': 'fa-comments',
         'atlascloud': 'fa-cloud',
+        'qiniu': 'fa-cloud',
+        'fenno': 'fa-code',
         'claude-custom': 'fa-brain',
         'claude-kiro-oauth': 'fa-robot',
         'openai-qwen-oauth': 'fa-code',
@@ -511,17 +537,20 @@ function renderRoutingExamples(providerConfigs) {
     // 默认模型映射 (用于 curl 示例)
     const modelMap = {
         'gemini-cli-oauth': 'gemini-3-flash-preview',
-        'gemini-antigravity': 'gemini-3-flash-preview',
-        'claude-custom': 'claude-sonnet-4-6',
-        'claude-kiro-oauth': 'claude-sonnet-4-6',
-        'openai-custom': 'gpt-4o',
-        'atlascloud': 'gpt-4o',
+        'gemini-antigravity': 'gemini-3-flash',
+        'claude-custom': 'claude-sonnet-4-5',
+        'claude-kiro-oauth': 'claude-sonnet-4-5',
+        'openai-custom': 'gpt-5.5',
+        'atlascloud': 'gpt-5.5',
+        'qiniu': 'gpt-5.5',
+        'fenno': 'gpt-5.5',
         'openai-qwen-oauth': 'qwen3-coder-plus',
         'openai-iflow': 'qwen3-max',
         'openai-codex-oauth': 'gpt-5',
-        'grok-cli-oauth': 'grok-3-mini',
-        'grok-web': 'grok-4.1-mini',
-        'openaiResponses-custom': 'gpt-4o'
+        'openaiResponses-custom': 'gpt-5.5',
+        'grok-web': 'grok-4.3',
+        'grok-cli-oauth': 'grok-4.3',
+        'forward-api': 'gpt-5.5'
     };
 
     providerConfigs.forEach(config => {

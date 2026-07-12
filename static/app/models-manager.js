@@ -188,6 +188,8 @@ function getProviderDisplayName(providerType) {
         'claude-kiro-oauth': 'Claude Kiro (OAuth)',
         'openai-custom': 'OpenAI Custom',
         'atlascloud': 'AtlasCloud',
+        'qiniu': 'Qiniu Cloud AI',
+        'fenno': 'Fenno.ai',
         'openaiResponses-custom': 'OpenAI Responses Custom',
         'openai-qwen-oauth': 'Qwen (OAuth)',
         'openai-iflow': 'iFlow',

@@ -79,9 +79,23 @@ export class CustomModelsManager {
         if (!client) return;
         try {
             const response = await client.get('/providers');
-            if (response && response.supportedProviders) {
-                // 使用 utils 中的标准方法处理提供商列表，获取友好名称
-                this.providers = getProviderConfigs(response.supportedProviders);
+            if (response) {
+                const supportedProviders = response.supportedProviders || [];
+                const providerConfigs = getProviderConfigs(supportedProviders);
+                const providerDisplayOrder = providerConfigs.filter(c => c.visible !== false).map(c => c.id);
+                const actualProviderTypes = Object.keys(response.providers || {});
+                const extraProviderTypes = actualProviderTypes.filter(type => !providerDisplayOrder.includes(type));
+                const extraProviderConfigs = extraProviderTypes.map(type => ({
+                    id: type,
+                    name: type,
+                    icon: 'fa-server',
+                    visible: true
+                }));
+
+                // 与提供商管理池保持一致：按预设顺序展示已支持类型，并补齐配置文件中实际存在的动态分组
+                this.providers = providerConfigs
+                    .filter(config => config.visible !== false)
+                    .concat(extraProviderConfigs);
                 this.updateProviderOptions();
             }
         } catch (e) { console.error(e); }

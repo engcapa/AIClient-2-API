@@ -21,30 +21,35 @@ function getBaseProviderConfigs() {
         { 
             id: 'gemini-cli-oauth', 
             name: t('dashboard.routing.nodeName.gemini'), 
+            usageName: 'Gemini CLI',
             icon: 'fa-robot',
             defaultPath: 'configs/gemini/'
         },
         { 
             id: 'gemini-antigravity', 
             name: t('dashboard.routing.nodeName.antigravity'), 
+            usageName: 'Antigravity',
             icon: 'fa-rocket',
             defaultPath: 'configs/antigravity/'
         },
         { 
             id: 'claude-kiro-oauth', 
             name: t('dashboard.routing.nodeName.kiro'), 
+            usageName: 'Kiro',
             icon: 'fa-key',
             defaultPath: 'configs/kiro/'
         },
         { 
             id: 'openai-codex-oauth', 
             name: t('dashboard.routing.nodeName.codex'), 
+            usageName: 'Codex',
             icon: 'fa-code',
             defaultPath: 'configs/codex/'
         },
         {
             id: 'grok-cli-oauth',
             name: t('dashboard.routing.nodeName.grokCli'),
+            usageName: 'Grok CLI',
             icon: 'fa-terminal',
             defaultPath: 'configs/grok-cli/'
         },
@@ -63,6 +68,7 @@ function getBaseProviderConfigs() {
         { 
             id: 'grok-web', 
             name: t('dashboard.routing.nodeName.grok'), 
+            usageName: 'Grok Web',
             icon: 'fa-user-secret'
         },
         { 
@@ -86,9 +92,23 @@ function getBaseProviderConfigs() {
             icon: 'fa-reply-all'
         },
         { 
+            id: 'qiniu', 
+            name: 'Qiniu Cloud AI', 
+            icon: 'fa-cloud',
+            registerUrl: 'https://s.qiniu.com/FRF7bq',
+            docUrl: 'https://docs.modelink.ai/api-endpoints/overview'
+        },
+        { 
+            id: 'fenno', 
+            name: 'Fenno.ai', 
+            icon: 'fa-code',
+            registerUrl: 'https://api.fenno.ai/register?redirect=/purchase?tab=subscription%26group=16&aff=2EW65KEQC938'
+        },
+        { 
             id: 'atlascloud', 
             name: 'AtlasCloud', 
-            icon: 'fa-cloud'
+            icon: 'fa-cloud',
+            registerUrl: 'https://www.atlascloud.ai/console/coding-plan'
         },
     ];
 }
@@ -286,7 +306,35 @@ function getProviderTypeFields(providerType) {
                 id: 'OPENAI_BASE_URL',
                 label: 'OpenAI Base URL',
                 type: 'text',
-                placeholder: 'https://api.openai.com/v1'
+                placeholder: 'https://api.atlascloud.ai/v1'
+            }
+        ],
+        'qiniu': [
+            {
+                id: 'OPENAI_API_KEY',
+                label: t('modal.provider.field.apiKey'),
+                type: 'password',
+                placeholder: 'sk-...'
+            },
+            {
+                id: 'OPENAI_BASE_URL',
+                label: 'OpenAI Base URL',
+                type: 'text',
+                placeholder: 'https://api.qnaigc.com/v1'
+            }
+        ],
+        'fenno': [
+            {
+                id: 'OPENAI_API_KEY',
+                label: t('modal.provider.field.apiKey'),
+                type: 'password',
+                placeholder: 'sk-...'
+            },
+            {
+                id: 'OPENAI_BASE_URL',
+                label: 'OpenAI Base URL',
+                type: 'text',
+                placeholder: 'https://api.fenno.ai/v1'
             }
         ],
         'openaiResponses-custom': [

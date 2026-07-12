@@ -49,6 +49,7 @@ const ANTIGRAVITY_MODELS = getProviderModels(MODEL_PROVIDER.ANTIGRAVITY);
 const ANTIGRAVITY_CLIENT_TO_UPSTREAM_MODEL = {
     'gemini-3.1-pro-high': 'gemini-pro-agent',
     'gemini-3.1-pro-preview': 'gemini-pro-agent',
+    'gemini-3.5-flash-high': 'gemini-3.5-flash-low',
 };
 
 const ANTIGRAVITY_UPSTREAM_TO_CLIENT_MODELS = {
@@ -1609,6 +1610,9 @@ export class AntigravityApiService {
     buildAntigravityPayload(model, requestBody) {
         let selectedModel = normalizeAntigravityModelId(model);
         if (!this.availableModels.includes(selectedModel) && !isKnownAntigravityModel(selectedModel)) {
+            if (this.config.MODEL_FALLBACK_ENABLED === false) {
+                throw new Error(`[Antigravity] 模型不存在: ${model}`);
+            }
             logger.warn(`[Antigravity] Model '${model}' not found. Using default model: 'gemini-3-flash'`);
             selectedModel = 'gemini-3-flash';
             requestBody.model = selectedModel;

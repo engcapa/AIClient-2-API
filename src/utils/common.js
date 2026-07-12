@@ -327,6 +327,7 @@ export const API_ACTIONS = {
     GENERATE_CONTENT: 'generateContent',
     STREAM_GENERATE_CONTENT: 'streamGenerateContent',
 };
+export const DEFAULT_REQUEST_BODY_MAX_BYTES = 10 * 1024 * 1024;
 
 import {
     usesManagedModelList,
@@ -521,8 +522,10 @@ export function getProtocolPrefix(provider) {
     if (provider === 'grok-cli-oauth' || provider.startsWith('grok-cli-oauth-')) {
         return MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES;
     }
-    // Special case for AtlasCloud - it uses openai protocol
-    if (provider === 'atlascloud' || provider.startsWith('atlascloud-')) {
+    // Special cases for OpenAI-compatible dedicated providers.
+    if (provider === 'atlascloud' || provider.startsWith('atlascloud-') ||
+        provider === 'qiniu' || provider.startsWith('qiniu-') ||
+        provider === 'fenno' || provider.startsWith('fenno-')) {
         return MODEL_PROTOCOL_PREFIX.OPENAI;
     }
 
@@ -680,8 +683,7 @@ export function getRequestBody(req, options = {}) {
         let body = '';
         let receivedBytes = 0;
         let settled = false;
-        const DEFAULT_MAX_BYTES = 10 * 1024 * 1024; // Default 10MB limit
-        const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : DEFAULT_MAX_BYTES;
+        const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : DEFAULT_REQUEST_BODY_MAX_BYTES;
 
         // 1. Quick check Content-Length header
         const headers = req.headers || {};
@@ -827,6 +829,62 @@ function getPluginHookRequestId(config) {
     return config?._monitorRequestId || null;
 }
 
+/**
+ * 创建一个通用的「上游空响应」错误（HTTP 200 但内容完全为空：无文本、无工具调用、无思考内容）。
+ * 任何 provider 的 *-core.js 检测到这种情况时都可以抛出这个错误，以复用下面的空响应重试分支。
+ * 标记为可切换凭证重试，且不计入凭证错误次数（这通常不是凭证本身的问题，可能是上游偶发静默无输出）。
+ *
+ * @param {string} providerLabel - 用于日志/错误信息的标签，如 'Kiro'、'Qwen' 等
+ */
+export function createEmptyUpstreamResponseError(providerLabel = 'Upstream') {
+    const error = new Error(`[${providerLabel}] Upstream returned an empty response (no text, tool call, or thinking content).`);
+    error.isEmptyUpstreamResponse = true;
+    error.shouldSwitchCredential = true;
+    error.skipErrorCount = true;
+    return error;
+}
+
+/**
+ * 针对上游「空响应」（error.isEmptyUpstreamResponse）计算是否应该重试，并在应该重试时尝试获取一个
+ * 备用的服务实例。重试预算由 CONFIG.EMPTY_RESPONSE_MAX_RETRIES 控制，与凭证切换预算
+ * （CREDENTIAL_SWITCH_MAX_RETRIES）完全独立计数，避免一次空回把凭证切换预算耗光。
+ * 该机制不绑定具体 provider：任何 provider 抛出带 isEmptyUpstreamResponse 标记的错误都会走到这里。
+ *
+ * @param {string} [providerLabel='Upstream'] - 用于日志的 provider 标签，如 'Kiro'、'Qwen' 等
+ * @returns {Promise<{retry: boolean, result?: object, emptyResponseRetry?: number}>}
+ */
+async function resolveEmptyUpstreamResponseRetry(CONFIG, model, attemptsMade, logPrefix, providerLabel = 'Upstream') {
+    const emptyRetryMax = CONFIG?.EMPTY_RESPONSE_MAX_RETRIES ?? 2;
+    const emptyRetryDelayMs = CONFIG?.EMPTY_RESPONSE_RETRY_DELAY_MS ?? 500;
+
+    if (attemptsMade >= emptyRetryMax) {
+        logger.error(`${logPrefix} ${providerLabel} empty response persisted after ${emptyRetryMax} retr${emptyRetryMax === 1 ? 'y' : 'ies'} (same request body). Giving up.`);
+        return { retry: false };
+    }
+
+    logger.warn(`${logPrefix} ${providerLabel} empty response detected (no text/tool/thinking content). Retrying with the same request body (${attemptsMade + 1}/${emptyRetryMax})...`);
+    if (emptyRetryDelayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, emptyRetryDelayMs));
+    }
+
+    try {
+        // 动态导入以避免循环依赖
+        const { getApiServiceWithFallback } = await import('../services/service-manager.js');
+        const result = await getApiServiceWithFallback(CONFIG, model, { acquireSlot: true });
+
+        if (result && result.service) {
+            logger.info(`${logPrefix} Retrying empty ${providerLabel} response with credential: ${result.uuid} (provider: ${result.actualProviderType})`);
+            return { retry: true, result, emptyResponseRetry: attemptsMade + 1 };
+        }
+
+        logger.warn(`${logPrefix} No alternative credential available for empty-response retry.`);
+        return { retry: false };
+    } catch (retryError) {
+        logger.error(`${logPrefix} Failed to get alternative service for empty-response retry:`, retryError.message);
+        return { retry: false };
+    }
+}
+
 export async function handleStreamRequest(res, service, model, requestBody, fromProvider, toProvider, PROMPT_LOG_MODE, PROMPT_LOG_FILENAME, providerPoolManager, pooluuid, customName, retryContext = null) {
     let fullResponseText = '';
     let fullResponseJson = '';
@@ -839,7 +897,12 @@ export async function handleStreamRequest(res, service, model, requestBody, from
     const maxRetries = retryContext?.maxRetries ?? 5;
     const currentRetry = retryContext?.currentRetry ?? 0;
     const CONFIG = retryContext?.CONFIG;
-    const isRetry = currentRetry > 0;
+    // isRetry 用于判断当前调用是否是某次重试的递归帧：既包括凭证切换重试（currentRetry），
+    // 也包括上游空响应重试（emptyResponseRetry，参见 resolveEmptyUpstreamResponseRetry）。只有最外层（非重试）的调用帧才负责
+    // 绑定/解绑客户端事件监听器、发送响应头、以及在 finally 中写入流结束标记 / res.end()。
+    // 如果这里遗漏了 emptyResponseRetry，递归进去的重试帧会误以为自己是最外层，
+    // 导致外层和内层重复对同一个 res 做收尾（重复 res.end()），从而抛出 "write after end"。
+    const isRetry = currentRetry > 0 || (retryContext?.emptyResponseRetry ?? 0) > 0;
     
     // 使用共享的 clientDisconnected 状态（如果是重试，继承上层的状态）
     let clientDisconnected = retryContext?.clientDisconnected || { value: false };
@@ -1035,6 +1098,57 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             // 直接发送错误并结束
             const errorPayload = createStreamErrorResponse(error, fromProvider);
             if (!res.writableEnded) {
+                try {
+                    res.write(errorPayload);
+                    res.end();
+                } catch (writeErr) {
+                    logger.error('[Stream] Failed to write error response:', writeErr.message);
+                }
+            }
+            responseClosed = true;
+            return;
+        }
+
+        // 上游空响应（无文本/工具调用/思考内容）：使用独立的小额重试预算，
+        // 不占用凭证切换预算（CREDENTIAL_SWITCH_MAX_RETRIES），重试沿用同一份 requestBody，
+        // 不会让历史/token 变大。预算耗尽后直接返回明确错误，不再静默放行空的 end_turn。
+        // 任何 provider 只要抛出带 isEmptyUpstreamResponse 标记的错误都会走到这个分支（目前 Kiro 在用）。
+        if (error.isEmptyUpstreamResponse) {
+            const attemptsMade = retryContext?.emptyResponseRetry ?? 0;
+            const outcome = await resolveEmptyUpstreamResponseRetry(CONFIG, model, attemptsMade, '[Stream Retry]', toProvider);
+
+            if (outcome.retry) {
+                const { result, emptyResponseRetry } = outcome;
+                const newRetryContext = {
+                    ...retryContext,
+                    CONFIG,
+                    currentRetry,
+                    maxRetries,
+                    emptyResponseRetry,
+                    clientDisconnected,
+                    anyDataSent
+                };
+
+                return await handleStreamRequest(
+                    res,
+                    result.service,
+                    result.actualModel || model,
+                    requestBody,
+                    fromProvider,
+                    result.actualProviderType || toProvider,
+                    PROMPT_LOG_MODE,
+                    PROMPT_LOG_FILENAME,
+                    providerPoolManager,
+                    result.uuid,
+                    result.serviceConfig?.customName || customName,
+                    newRetryContext
+                );
+            }
+
+            const giveUpError = new Error(`${toProvider} upstream returned an empty response after ${attemptsMade} retr${attemptsMade === 1 ? 'y' : 'ies'} with the same request. Please try again, or /clear your session if this keeps happening.`);
+            giveUpError.status = 502;
+            const errorPayload = createStreamErrorResponse(giveUpError, fromProvider);
+            if (!clientDisconnected.value && !res.writableEnded) {
                 try {
                     res.write(errorPayload);
                     res.end();
@@ -1263,6 +1377,47 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         }
     } catch (error) {
         logger.error('\n[Server] Error during unary processing:', error.stack);
+
+        // 上游空响应（无文本/工具调用/思考内容）：使用独立的小额重试预算，
+        // 不占用凭证切换预算（CREDENTIAL_SWITCH_MAX_RETRIES），重试沿用同一份 requestBody，
+        // 不会让历史/token 变大。预算耗尽后直接返回明确错误，不再静默放行空响应。
+        // 任何 provider 只要抛出带 isEmptyUpstreamResponse 标记的错误都会走到这个分支（目前 Kiro 在用）。
+        if (error.isEmptyUpstreamResponse) {
+            const attemptsMade = retryContext?.emptyResponseRetry ?? 0;
+            const outcome = await resolveEmptyUpstreamResponseRetry(CONFIG, model, attemptsMade, '[Unary Retry]', toProvider);
+
+            if (outcome.retry) {
+                const { result, emptyResponseRetry } = outcome;
+                const newRetryContext = {
+                    ...retryContext,
+                    CONFIG,
+                    currentRetry,
+                    maxRetries,
+                    emptyResponseRetry
+                };
+
+                return await handleUnaryRequest(
+                    res,
+                    result.service,
+                    result.actualModel || model,
+                    requestBody,
+                    fromProvider,
+                    result.actualProviderType || toProvider,
+                    PROMPT_LOG_MODE,
+                    PROMPT_LOG_FILENAME,
+                    providerPoolManager,
+                    result.uuid,
+                    result.serviceConfig?.customName || customName,
+                    newRetryContext
+                );
+            }
+
+            const giveUpError = new Error(`${toProvider} upstream returned an empty response after ${attemptsMade} retr${attemptsMade === 1 ? 'y' : 'ies'} with the same request. Please try again, or /clear your session if this keeps happening.`);
+            giveUpError.status = 502;
+            const errorResponse = createErrorResponse(giveUpError, fromProvider);
+            await handleUnifiedResponse(res, JSON.stringify(errorResponse), false, 502);
+            return;
+        }
         
         // 获取状态码（用于日志记录，不再用于判断是否重试）
         const status = getErrorStatusCode(error);
@@ -1521,7 +1676,7 @@ export async function handleModelListRequest(req, res, service, endpointType, CO
  * @param {string} PROMPT_LOG_FILENAME - The prompt log filename.
  */
 export async function handleContentGenerationRequest(req, res, service, endpointType, CONFIG, PROMPT_LOG_FILENAME, providerPoolManager, pooluuid, requestPath = null) {
-    const originalRequestBody = await getRequestBody(req);
+    const originalRequestBody = await getRequestBody(req, { maxBytes: CONFIG.REQUEST_BODY_MAX_BYTES });
 
     if (!originalRequestBody) {
         throw new Error("Request body is missing for content generation.");

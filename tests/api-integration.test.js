@@ -22,6 +22,8 @@ const MODEL_PROVIDER = {
     GEMINI_CLI: 'gemini-cli-oauth',
     OPENAI_CUSTOM: 'openai-custom',
     ATLASCLOUD: 'atlascloud',
+    QINIU: 'qiniu',
+    FENNO: 'fenno',
     CLAUDE_CUSTOM: 'claude-custom',
     KIRO_API: 'claude-kiro-oauth',
 }
@@ -190,6 +192,48 @@ describe('API Integration Tests with HTTP Requests', () => {
                 'POST',
                 'bearer',
                 { 'model-provider': MODEL_PROVIDER.ATLASCLOUD },
+                REAL_TEST_DATA.openai.nonStreamRequest
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.headers.get('content-type')).toContain('application/json');
+            
+            const responseData = await response.json();
+            expect(responseData).toHaveProperty('choices');
+            expect(Array.isArray(responseData.choices)).toBe(true);
+            expect(responseData.choices.length).toBeGreaterThan(0);
+            expect(responseData.choices[0]).toHaveProperty('message');
+            expect(responseData.choices[0].message).toHaveProperty('content');
+        });
+
+        test('OpenAI /v1/chat/completions non-streaming with Qiniu provider', async () => {
+            REAL_TEST_DATA.openai.nonStreamRequest.model = "gpt-4o";
+            const response = await makeRequest(
+                `${TEST_SERVER_BASE_URL}/v1/chat/completions`,
+                'POST',
+                'bearer',
+                { 'model-provider': MODEL_PROVIDER.QINIU },
+                REAL_TEST_DATA.openai.nonStreamRequest
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.headers.get('content-type')).toContain('application/json');
+            
+            const responseData = await response.json();
+            expect(responseData).toHaveProperty('choices');
+            expect(Array.isArray(responseData.choices)).toBe(true);
+            expect(responseData.choices.length).toBeGreaterThan(0);
+            expect(responseData.choices[0]).toHaveProperty('message');
+            expect(responseData.choices[0].message).toHaveProperty('content');
+        });
+
+        test('OpenAI /v1/chat/completions non-streaming with Fenno provider', async () => {
+            REAL_TEST_DATA.openai.nonStreamRequest.model = "gpt-4o";
+            const response = await makeRequest(
+                `${TEST_SERVER_BASE_URL}/v1/chat/completions`,
+                'POST',
+                'bearer',
+                { 'model-provider': MODEL_PROVIDER.FENNO },
                 REAL_TEST_DATA.openai.nonStreamRequest
             );
 
@@ -540,6 +584,38 @@ describe('API Integration Tests with HTTP Requests', () => {
                 'GET',
                 'bearer',
                 { 'model-provider': MODEL_PROVIDER.ATLASCLOUD }
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.headers.get('content-type')).toContain('application/json');
+            
+            const responseData = await response.json();
+            expect(responseData).toHaveProperty('data');
+            expect(Array.isArray(responseData.data)).toBe(true);
+        });
+
+        test('OpenAI /v1/models Qiniu', async () => {
+            const response = await makeRequest(
+                `${TEST_SERVER_BASE_URL}/v1/models`,
+                'GET',
+                'bearer',
+                { 'model-provider': MODEL_PROVIDER.QINIU }
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.headers.get('content-type')).toContain('application/json');
+            
+            const responseData = await response.json();
+            expect(responseData).toHaveProperty('data');
+            expect(Array.isArray(responseData.data)).toBe(true);
+        });
+
+        test('OpenAI /v1/models Fenno', async () => {
+            const response = await makeRequest(
+                `${TEST_SERVER_BASE_URL}/v1/models`,
+                'GET',
+                'bearer',
+                { 'model-provider': MODEL_PROVIDER.FENNO }
             );
 
             expect(response.status).toBe(200);

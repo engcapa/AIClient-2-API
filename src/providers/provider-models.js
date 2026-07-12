@@ -99,6 +99,7 @@ export const PROVIDER_MODELS = {
     'claude-kiro-oauth': [
         'claude-haiku-4-5',
         'claude-haiku-4-5-20251001',
+        'claude-sonnet-5',
         'claude-opus-4-8',
         'claude-opus-4-7',
         'claude-opus-4-6',
@@ -117,6 +118,8 @@ export const PROVIDER_MODELS = {
     ],
     'openai-custom': [],
     'atlascloud': [],
+    'qiniu': [],
+    'fenno': [],
     'openaiResponses-custom': [],
     'openai-qwen-oauth': [
         'coder-model',
@@ -157,6 +160,9 @@ export const PROVIDER_MODELS = {
         'gpt-5.4',
         'gpt-5.4-mini',
         'gpt-5.5',
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
         'gpt-image-2',
     ],
     'grok-cli-oauth': [
@@ -167,14 +173,15 @@ export const PROVIDER_MODELS = {
         'grok-imagine-video',
         'grok-imagine-video-1.5-preview',
         'grok-imagine-video-1.5-2026-05-30',
+        'grok-4.5',
         'grok-4.3',
         'grok-4.20-0309-reasoning',
         'grok-4.20-0309-non-reasoning',
         'grok-4.20-multi-agent-0309',
-        'grok-3-mini',
-        'grok-3-mini-fast',
         'grok-4',
         'grok-4-fast',
+        'grok-3-mini',
+        'grok-3-mini-fast',
         'grok-3'
     ],
     'forward-api': [],
@@ -197,7 +204,9 @@ export const MANAGED_MODEL_LIST_PROVIDERS = [
     'openai-custom',
     'openaiResponses-custom',
     'claude-custom',
-    'atlascloud'
+    'atlascloud',
+    'qiniu',
+    'fenno'
 ];
 
 export function getManagedModelListProviderType(providerType) {

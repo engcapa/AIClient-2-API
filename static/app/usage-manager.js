@@ -1,6 +1,6 @@
 // 用量管理模块
 
-import { showToast, bindOnce } from './utils.js';
+import { showToast, bindOnce, getBaseProviderConfigs } from './utils.js';
 import { getAuthHeaders } from './auth.js';
 import { t, getCurrentLanguage } from './i18n.js';
 
@@ -171,6 +171,48 @@ export async function refreshSingleInstanceUsage(providerType, uuid, displayName
     } catch (error) {
         console.error('刷新单个实例用量失败:', error);
         showToast(error.message || t('common.requestFailed'), 'error');
+    }
+}
+
+async function resetSingleInstanceUsage(providerType, uuid, displayName, buttonEl) {
+    const confirmed = window.confirm(t('usage.codex.resetConfirm', { name: displayName }));
+    if (!confirmed) {
+        return;
+    }
+
+    const originalDisabled = buttonEl?.disabled;
+    if (buttonEl) {
+        buttonEl.disabled = true;
+    }
+
+    try {
+        showToast(t('common.info'), t('usage.codex.resetting', { name: displayName }), 'info');
+
+        const response = await fetch(`/api/usage/${providerType}/${uuid}/reset`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error?.message || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data?.instance?.uuid) {
+            updateSingleInstanceCard(providerType, data.instance);
+        } else {
+            await refreshSingleInstanceUsage(providerType, uuid, displayName);
+        }
+
+        showToast(t('common.success'), t('usage.codex.resetSuccess'), 'success');
+    } catch (error) {
+        console.error('重置单个实例用量失败:', error);
+        showToast(t('common.error'), error.message || t('common.requestFailed'), 'error');
+    } finally {
+        if (buttonEl) {
+            buttonEl.disabled = originalDisabled || false;
+        }
     }
 }
 
@@ -367,6 +409,10 @@ function createInstanceUsageCard(instance, providerType) {
     const summary = usage.summary || { usedPercent: 0, status: 'normal' };
     const user = usage.user || {};
     const displayName = user.email || instance.name || instance.uuid;
+    const providerDisplayName = getProviderDisplayName(providerType);
+    const resetAvailableCount = summary.resetAvailableCount ?? 0;
+    const canResetQuota = instance.success && summary.resetAvailableCount !== undefined;
+    const codexResetButtonLabel = `${t('usage.codex.resetActionShort')} ${t('usage.codex.resetCredits', { count: resetAvailableCount })}`;
 
     // 使用后端返回的 planClass，如果缺失则兜底
     const planClass = summary.planClass || 'plan-default';
@@ -394,8 +440,9 @@ function createInstanceUsageCard(instance, providerType) {
         <div class="usage-card-expanded-content">
             <div class="usage-instance-header">
                 <div class="instance-header-top">
-                    <div class="instance-provider-type"><i class="${getProviderIcon(providerType)}"></i><span>${getProviderDisplayName(providerType)}</span></div>
+                    <div class="instance-provider-type" title="${providerDisplayName}"><i class="${getProviderIcon(providerType)}"></i><span>${providerDisplayName}</span></div>
                     <div class="instance-status-badges">
+                        ${canResetQuota ? `<button class="btn-reset-usage btn-reset-usage-inline" title="${t('usage.codex.resetAction')}" data-tooltip="${codexResetButtonLabel}" ${resetAvailableCount > 0 ? '' : 'disabled'}><i class="fas fa-rotate-left"></i></button>` : ''}
                         ${instance.configFilePath ? `<button class="btn-download-config" title="${t('usage.card.downloadConfig')}"><i class="fas fa-download"></i></button>` : ''}
                         <button class="btn-refresh-usage" title="${t('usage.card.refresh')}"><i class="fas fa-sync-alt"></i></button>
                         ${instance.isDisabled ? `<span class="badge badge-disabled">${t('usage.card.status.disabled')}</span>` : `<span class="badge ${instance.isHealthy ? 'badge-healthy' : 'badge-unhealthy'}">${t(instance.isHealthy ? 'usage.card.status.healthy' : 'usage.card.status.unhealthy')}</span>`}
@@ -420,6 +467,14 @@ function createInstanceUsageCard(instance, providerType) {
         e.stopPropagation(); 
         refreshSingleInstanceUsage(providerType, instance.uuid, displayName); 
     };
+
+    const resetBtn = card.querySelector('.btn-reset-usage');
+    if (resetBtn) {
+        resetBtn.onclick = (e) => {
+            e.stopPropagation();
+            resetSingleInstanceUsage(providerType, instance.uuid, displayName, resetBtn);
+        };
+    }
 
     const contentArea = card.querySelector('.usage-instance-content');
     if (instance.error) {
@@ -477,21 +532,20 @@ function renderUsageDetails(usage) {
 }
 
 function getProviderDisplayName(type) {
-    if (currentProviderConfigs) {
-        const config = currentProviderConfigs.find(c => c.id === type);
-        if (config?.name) return config.name;
-    }
-    const names = { 'claude-kiro-oauth': 'Claude Kiro', 'gemini-cli-oauth': 'Gemini CLI', 'gemini-antigravity': 'Antigravity', 'openai-codex-oauth': 'Codex', 'grok-cli-oauth': 'Grok CLI', 'grok-web': 'Grok Web' };
-    return names[type] || type;
+    return getProviderMeta(type).name;
 }
 
 function getProviderIcon(type) {
-    if (currentProviderConfigs) {
-        const config = currentProviderConfigs.find(c => c.id === type);
-        if (config?.icon) return config.icon.startsWith('fa-') ? `fas ${config.icon}` : config.icon;
-    }
-    const icons = { 'claude-kiro-oauth': 'fas fa-robot', 'gemini-cli-oauth': 'fas fa-gem', 'gemini-antigravity': 'fas fa-rocket', 'openai-codex-oauth': 'fas fa-terminal', 'grok-cli-oauth': 'fas fa-terminal', 'grok-web': 'fas fa-brain' };
-    return icons[type] || 'fas fa-server';
+    const icon = getProviderMeta(type).icon;
+    return icon.startsWith('fa-') ? `fas ${icon}` : icon;
+}
+
+function getProviderMeta(type) {
+    const config = currentProviderConfigs?.find(c => c.id === type) || getBaseProviderConfigs().find(c => c.id === type);
+    return {
+        name: config?.usageName || config?.shortName || config?.name || type,
+        icon: config?.icon || 'fa-server'
+    };
 }
 
 async function downloadConfigFile(path) {

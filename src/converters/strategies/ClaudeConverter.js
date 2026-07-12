@@ -39,6 +39,15 @@ import {
  * Claude转换器类
  * 实现Claude协议到其他协议的转换
  */
+/**
+ * 清洗 tool_use/tool_result ID，只保留 [a-zA-Z0-9_-] 字符
+ * Claude API 要求 tool_use.id 匹配 ^[a-zA-Z0-9_-]+$
+ */
+function sanitizeToolId(id) {
+    if (!id) return id;
+    return String(id).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 export class ClaudeConverter extends BaseConverter {
     constructor() {
         super('claude');
@@ -948,10 +957,14 @@ export class ClaudeConverter extends BaseConverter {
                                 
                             case 'tool_use':
                                 // 转换为 Gemini functionCall 格式
-                                if (block.name && block.input) {
-                                    const args = typeof block.input === 'string'
-                                        ? block.input
-                                        : JSON.stringify(block.input);
+                                // [FIX] 允许 input 为 null/undefined/{} 等任何值，避免 tool_use 块被静默丢弃
+                                if (block.name) {
+                                    const rawInput = block.input ?? {};
+                                    const args = typeof rawInput === 'string'
+                                        ? rawInput
+                                        : JSON.stringify(rawInput);
+                                    // [FIX] 当 id 缺失时自动生成，确保 Antigravity 转 Claude 时 tool_use.id 不为空
+                                    const toolUseId = sanitizeToolId(block.id) || `toolu_${uuidv4().replace(/-/g, '')}`;
                                     
                                     // 验证 args 是有效的 JSON 对象
                                     try {
@@ -959,12 +972,9 @@ export class ClaudeConverter extends BaseConverter {
                                         if (parsedArgs && typeof parsedArgs === 'object') {
                                             const fc = {
                                                 name: block.name,
-                                                args: parsedArgs
+                                                args: parsedArgs,
+                                                id: toolUseId
                                             };
-                                            // 保留 tool_use.id，Antigravity 转 Claude 时必需此字段
-                                            if (block.id) {
-                                                fc.id = block.id;
-                                            }
                                             parts.push({
                                                 thoughtSignature: ClaudeConverter.GEMINI_CLAUDE_THOUGHT_SIGNATURE,
                                                 functionCall: fc
@@ -972,28 +982,25 @@ export class ClaudeConverter extends BaseConverter {
                                         }
                                     } catch (e) {
                                         // 如果解析失败，尝试直接使用 input
-                                        if (block.input && typeof block.input === 'object') {
-                                            const fc = {
-                                                name: block.name,
-                                                args: block.input
-                                            };
-                                            if (block.id) {
-                                                fc.id = block.id;
-                                            }
-                                            parts.push({
-                                                thoughtSignature: ClaudeConverter.GEMINI_CLAUDE_THOUGHT_SIGNATURE,
-                                                functionCall: fc
-                                            });
-                                        }
+                                        const fallbackInput = rawInput && typeof rawInput === 'object' ? rawInput : {};
+                                        const fc = {
+                                            name: block.name,
+                                            args: fallbackInput,
+                                            id: toolUseId
+                                        };
+                                        parts.push({
+                                            thoughtSignature: ClaudeConverter.GEMINI_CLAUDE_THOUGHT_SIGNATURE,
+                                            functionCall: fc
+                                        });
                                     }
                                 }
                                 break;
                                 
                             case 'tool_result':
                                 // 转换为 Gemini functionResponse 格式
-                                // 的实现，正确处理 tool_use_id 到函数名的映射
-                                const toolCallId = block.tool_use_id;
-                                if (toolCallId) {
+                                // [FIX] 当 tool_use_id 缺失时自动生成，确保 functionResponse.id 不为空
+                                const toolCallId = sanitizeToolId(block.tool_use_id) || `tool_result_${uuidv4().replace(/-/g, '')}`;
+                                {
                                     // 尝试从之前的 tool_use 块中查找对应的函数名
                                     // 如果找不到，则从 tool_use_id 中提取
                                     let funcName = toolCallId;

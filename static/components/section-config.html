@@ -112,6 +112,14 @@
                             <i class="fas fa-cloud"></i>
                             <span data-i18n="dashboard.routing.nodeName.atlascloud">AtlasCloud</span>
                         </button>
+                        <button type="button" class="provider-tag" data-value="qiniu">
+                            <i class="fas fa-cloud"></i>
+                            <span data-i18n="dashboard.routing.nodeName.qiniu">Qiniu Cloud AI</span>
+                        </button>
+                        <button type="button" class="provider-tag" data-value="fenno">
+                            <i class="fas fa-code"></i>
+                            <span data-i18n="dashboard.routing.nodeName.fenno">Fenno.ai</span>
+                        </button>
 
                         <button type="button" class="provider-tag" data-value="openai-codex-oauth">
                             <i class="fas fa-code"></i>
@@ -176,6 +184,14 @@
                         <button type="button" class="provider-tag" data-value="atlascloud">
                             <i class="fas fa-cloud"></i>
                             <span data-i18n="dashboard.routing.nodeName.atlascloud">AtlasCloud</span>
+                        </button>
+                        <button type="button" class="provider-tag" data-value="qiniu">
+                            <i class="fas fa-cloud"></i>
+                            <span data-i18n="dashboard.routing.nodeName.qiniu">Qiniu Cloud AI</span>
+                        </button>
+                        <button type="button" class="provider-tag" data-value="fenno">
+                            <i class="fas fa-code"></i>
+                            <span data-i18n="dashboard.routing.nodeName.fenno">Fenno.ai</span>
                         </button>
 
                         <button type="button" class="provider-tag" data-value="openai-codex-oauth">
@@ -243,6 +259,15 @@
                     <div class="form-group">
                         <label for="maxErrorCount" data-i18n="config.advanced.maxErrorCount">节点最大错误阈值</label>
                         <input type="number" id="maxErrorCount" class="form-control" value="10" min="1" max="20">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label data-i18n="config.advanced.modelFallbackEnabled">启用模型不存在自动 Fallback</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="modelFallbackEnabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
                     </div>
                 </div>
 
